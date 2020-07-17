@@ -186,15 +186,27 @@ func (m *DefinitionMonitor) getServiceDefinitionFromAnnotatedService(service *co
 		} else {
 			svc.Address = service.ObjectMeta.Name
 		}
-		target := types.ServiceInterfaceTarget{
-			Name:     service.ObjectMeta.Name,
-			Selector: utils.StringifySelector(service.Spec.Selector),
-		}
-		if targetPort := deduceTargetPortFromService(service); targetPort != 0 {
-			target.TargetPort = targetPort
-		}
-		svc.Targets = []types.ServiceInterfaceTarget{
-			target,
+		if target, ok := service.ObjectMeta.Annotations[types.TargetServiceQualifier]; ok {
+			svc.Targets = []types.ServiceInterfaceTarget{
+				types.ServiceInterfaceTarget{
+					Name:     target,
+					Service:  target,
+				},
+			}
+		} else if service.Spec.Selector != nil {
+			target := types.ServiceInterfaceTarget{
+				Name:     service.ObjectMeta.Name,
+				Selector: utils.StringifySelector(service.Spec.Selector),
+			}
+			if targetPort := deduceTargetPortFromService(service); targetPort != 0 {
+				target.TargetPort = targetPort
+			}
+			svc.Targets = []types.ServiceInterfaceTarget{
+				target,
+			}
+		} else {
+			log.Printf("Ignoring annotated service %s; no selector defined", service.ObjectMeta.Name)
+			return svc, false
 		}
 		svc.Origin = "annotation"
 		return svc, true

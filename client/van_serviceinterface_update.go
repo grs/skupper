@@ -78,6 +78,12 @@ func getServiceInterfaceTarget(targetType string, targetName string, deducePort 
 		}
 	} else if targetType == "pods" {
 		return nil, fmt.Errorf("VAN service interfaces for pods not yet implemented")
+	} else if targetType == "service" {
+		target := types.ServiceInterfaceTarget{
+			Name:     targetName,
+			Service:  targetName,
+		}
+		return &target, nil
 	} else {
 		return nil, fmt.Errorf("VAN service interface unsupported target type")
 	}
@@ -312,7 +318,7 @@ func removeServiceInterfaceTarget(serviceName string, targetName string, deleteI
 }
 
 func (cli *VanClient) VanServiceInterfaceUnbind(ctx context.Context, targetType string, targetName string, address string, deleteIfNoTargets bool) error {
-	if targetType == "deployment" || targetType == "statefulset" {
+	if targetType == "deployment" || targetType == "statefulset" || targetType == "service" {
 		if address == "" {
 			err := removeServiceInterfaceTarget(targetName, targetName, deleteIfNoTargets, cli)
 			return err

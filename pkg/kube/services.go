@@ -12,7 +12,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 )
 
-func getLabelsForRouter() map[string]string {
+func GetLabelsForRouter() map[string]string {
 	return map[string]string{
 		"application":          types.TransportDeploymentName,
 		"skupper.io/component": "router",
@@ -44,7 +44,7 @@ func GetService(name string, namespace string, kubeclient kubernetes.Interface) 
 }
 
 func NewServiceForAddress(address string, port int, targetPort int, owner *metav1.OwnerReference, namespace string, kubeclient kubernetes.Interface) (*corev1.Service, error) {
-	labels := getLabelsForRouter()
+	labels := GetLabelsForRouter()
 	service := makeServiceObjectForAddress(address, port, targetPort, labels, owner)
 	return createServiceFromObject(service, namespace, kubeclient)
 }
