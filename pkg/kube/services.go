@@ -44,9 +44,9 @@ func GetService(name string, namespace string, kubeclient kubernetes.Interface) 
 	return current, err
 }
 
-func NewServiceForAddress(address string, port int, targetPort int, owner *metav1.OwnerReference, namespace string, kubeclient kubernetes.Interface) (*corev1.Service, error) {
+func NewServiceForAddress(address string, protocol corev1.Protocol, port int, targetPort int, owner *metav1.OwnerReference, namespace string, kubeclient kubernetes.Interface) (*corev1.Service, error) {
 	labels := GetLabelsForRouter()
-	service := makeServiceObjectForAddress(address, port, targetPort, labels, owner)
+	service := makeServiceObjectForAddress(address, protocol, port, targetPort, labels, owner)
 	return createServiceFromObject(service, namespace, kubeclient)
 }
 
@@ -54,12 +54,12 @@ func NewHeadlessServiceForAddress(address string, port int, targetPort int, owne
 	labels := map[string]string{
 		"internal.skupper.io/service": "myservice2",
 	}
-	service := makeServiceObjectForAddress(address, port, targetPort, labels, owner)
+	service := makeServiceObjectForAddress(address, "TCP", port, targetPort, labels, owner)
 	service.Spec.ClusterIP = "None"
 	return createServiceFromObject(service, namespace, kubeclient)
 }
 
-func makeServiceObjectForAddress(address string, port int, targetPort int, labels map[string]string, owner *metav1.OwnerReference) *corev1.Service {
+func makeServiceObjectForAddress(address string, protocol corev1.Protocol, port int, targetPort int, labels map[string]string, owner *metav1.OwnerReference) *corev1.Service {
 	// TODO: make common service creation and deal with annotation, label differences
 	service := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
@@ -79,6 +79,7 @@ func makeServiceObjectForAddress(address string, port int, targetPort int, label
 					Name:       address,
 					Port:       int32(port),
 					TargetPort: intstr.FromInt(targetPort),
+					Protocol:   protocol,
 				},
 			},
 		},

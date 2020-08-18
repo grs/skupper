@@ -28,6 +28,7 @@ type ExposeOptions struct {
 	Port       int
 	TargetPort int
 	Headless   bool
+	Multicast  bool
 }
 
 func expose(cli *client.VanClient, ctx context.Context, targetType string, targetName string, options ExposeOptions) error {
@@ -55,12 +56,15 @@ func expose(cli *client.VanClient, ctx context.Context, targetType string, targe
 				Address:  serviceName,
 				Port:     options.Port,
 				Protocol: options.Protocol,
+				Multicast: options.Multicast,
 			}
 		}
 	} else if service.Headless != nil {
 		return fmt.Errorf("Service already exposed as headless")
 	} else if options.Headless {
 		return fmt.Errorf("Service already exposed, cannot reconfigure as headless")
+	} else if options.Multicast != service.Multicast {
+		return fmt.Errorf("Service already defined, cannot reconfigure multicast")
 	} else if options.Protocol != "" && service.Protocol != options.Protocol {
 		return fmt.Errorf("Invalid protocol %s for service with mapping %s", options.Protocol, service.Protocol)
 	}
@@ -495,11 +499,12 @@ func main() {
 			}
 		},
 	}
-	cmdExpose.Flags().StringVar(&(exposeOpts.Protocol), "protocol", "tcp", "The protocol to proxy (tcp, http, or http2)")
+	cmdExpose.Flags().StringVar(&(exposeOpts.Protocol), "protocol", "tcp", "The protocol to proxy (tcp, udp, http, or http2)")
 	cmdExpose.Flags().StringVar(&(exposeOpts.Address), "address", "", "The Skupper address to expose")
 	cmdExpose.Flags().IntVar(&(exposeOpts.Port), "port", 0, "The port to expose on")
 	cmdExpose.Flags().IntVar(&(exposeOpts.TargetPort), "target-port", 0, "The port to target on pods")
 	cmdExpose.Flags().BoolVar(&(exposeOpts.Headless), "headless", false, "Expose through a headless service (valid only for a statefulset target)")
+	cmdExpose.Flags().BoolVar(&(exposeOpts.Multicast), "multicast", false, "Expose as a multicast service (valid only for udp services)")
 
 	var unexposeAddress string
 	var cmdUnexpose = &cobra.Command{
@@ -608,9 +613,10 @@ func main() {
 			}
 		},
 	}
-	cmdCreateService.Flags().StringVar(&serviceToCreate.Protocol, "mapping", "tcp", "The mapping in use for this service address (currently one of tcp or http)")
+	cmdCreateService.Flags().StringVar(&serviceToCreate.Protocol, "mapping", "tcp", "The mapping in use for this service address (currently one of tcp, udp or http)")
 	cmdCreateService.Flags().StringVar(&serviceToCreate.Aggregate, "aggregate", "", "The aggregation strategy to use. One of 'json' or 'multipart'. If specified requests to this service will be sent to all registered implementations and the responses aggregated.")
 	cmdCreateService.Flags().BoolVar(&serviceToCreate.EventChannel, "event-channel", false, "If specified, this service will be a channel for multicast events.")
+	cmdCreateService.Flags().BoolVar(&serviceToCreate.Multicast, "multicast", false, "If specified, this service will multicast all messages sent (udp only).")
 	cmdService.AddCommand(cmdCreateService)
 
 	var cmdDeleteService = &cobra.Command{
@@ -635,8 +641,8 @@ func main() {
 		Short: "Bind a target to a service",
 		Args:  bindArgs(),
 		Run: func(cmd *cobra.Command, args []string) {
-			if protocol != "" && protocol != "tcp" && protocol != "http" && protocol != "http2" {
-				fmt.Printf("%s is not a valid protocol. Choose 'tcp', 'http' or 'http2'.", protocol)
+			if protocol != "" && protocol != "tcp" && protocol != "udp" && protocol != "http" && protocol != "http2" {
+				fmt.Printf("%s is not a valid protocol. Choose 'tcp', 'udp', 'http' or 'http2'.", protocol)
 				fmt.Println()
 				os.Exit(1)
 			} else {
@@ -668,7 +674,7 @@ func main() {
 			}
 		},
 	}
-	cmdBind.Flags().StringVar(&protocol, "protocol", "", "The protocol to proxy (tcp, http or http2.")
+	cmdBind.Flags().StringVar(&protocol, "protocol", "", "The protocol to proxy (tcp, udp, http or http2.")
 	cmdBind.Flags().IntVar(&targetPort, "target-port", 0, "The port the target is listening on.")
 
 	var cmdUnbind = &cobra.Command{

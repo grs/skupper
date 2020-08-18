@@ -37,6 +37,9 @@ func (c *Controller) serviceSyncDefinitionsUpdated(definitions map[string]types.
 			Protocol: original.Protocol,
 			Port:     original.Port,
 			Origin:   original.Origin,
+			Aggregate: original.Aggregate,
+			EventChannel: original.EventChannel,
+			Multicast: original.Multicast,
 			Headless: original.Headless,
 			Targets:  []types.ServiceInterfaceTarget{},
 		}
@@ -82,7 +85,7 @@ func (c *Controller) serviceSyncDefinitionsUpdated(definitions map[string]types.
 }
 
 func equivalentServiceDefinition(a *types.ServiceInterface, b *types.ServiceInterface) bool {
-	if a.Protocol != b.Protocol || a.Port != b.Port || a.EventChannel != b.EventChannel || a.Aggregate != b.Aggregate {
+	if a.Protocol != b.Protocol || a.Port != b.Port || a.EventChannel != b.EventChannel || a.Aggregate != b.Aggregate || a.Multicast != b.Multicast {
 		return false
 	}
 	if a.Headless == nil && b.Headless == nil {

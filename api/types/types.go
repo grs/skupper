@@ -49,7 +49,7 @@ const (
 	TransportViewRoleName       string = "skupper-view"
 	TransportEnvConfig          string = "QDROUTERD_CONF"
 	TransportSaslConfig         string = "skupper-sasl-config"
-	DefaultBridgeServerImage    string = "quay.io/skupper/bridge-server"
+	DefaultBridgeServerImage    string = "quay.io/gordons/bridge-server:udp-preview"
 	BridgeServerContainerName   string = "bridge-server"
 )
 
@@ -70,9 +70,9 @@ var TransportPrometheusAnnotations = map[string]string{
 const (
 	ControllerDeploymentName     string = "skupper-service-controller"
 	ControllerComponentName      string = "proxy-controller"
-	DefaultControllerImage       string = "quay.io/skupper/service-controller"
+	DefaultControllerImage       string = "quay.io/gordons/service-controller:udp-preview"
 	ControllerContainerName      string = "service-controller"
-	DefaultProxyImage            string = "quay.io/skupper/proxy"
+	DefaultProxyImage            string = "quay.io/gordons/proxy:udp-preview"
 	ControllerServiceAccountName string = "skupper-proxy-controller"
 	ControllerConfigPath         string = "/etc/messaging/"
 	ControllerEditRoleName       string = "skupper-edit"
@@ -323,6 +323,7 @@ type ServiceInterface struct {
 	Address      string                   `json:"address"`
 	Protocol     string                   `json:"protocol"`
 	Port         int                      `json:"port"`
+	Multicast    bool                     `json:"multicast,omitempty"`
 	EventChannel bool                     `json:"eventchannel,omitempty"`
 	Aggregate    string                   `json:"aggregate,omitempty"`
 	Headless     *Headless                `json:"headless,omitempty"`

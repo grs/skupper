@@ -268,9 +268,17 @@ func (c *Controller) Run(stopCh <-chan struct{}) error {
 	return nil
 }
 
+func getServiceProtocol(desired *ServiceBindings) corev1.Protocol {
+	if desired.protocol == "udp" {
+		return corev1.ProtocolUDP
+	} else {
+		return corev1.ProtocolTCP
+	}
+}
+
 func (c *Controller) createServiceFor(desired *ServiceBindings) error {
 	log.Println("Creating new service for ", desired.address)
-	_, err := kube.NewServiceForAddress(desired.address, desired.publicPort, desired.ingressPort, getOwnerReference(), c.vanClient.Namespace, c.vanClient.KubeClient)
+	_, err := kube.NewServiceForAddress(desired.address, getServiceProtocol(desired), desired.publicPort, desired.ingressPort, getOwnerReference(), c.vanClient.Namespace, c.vanClient.KubeClient)
 	if err != nil {
 		log.Printf("Error while creating service %s: %s", desired.address, err)
 	}

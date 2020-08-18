@@ -171,8 +171,10 @@ func validateServiceInterface(service *types.ServiceInterface) error {
 		return fmt.Errorf("Only one of aggregate and event-channel can be specified for a given service.")
 	} else if service.Aggregate != "" && service.Aggregate != "json" && service.Aggregate != "multipart" {
 		return fmt.Errorf("%s is not a valid aggregation strategy. Choose 'json' or 'multipart'.", service.Aggregate)
-	} else if service.Protocol != "" && service.Protocol != "tcp" && service.Protocol != "http" && service.Protocol != "http2" {
-		return fmt.Errorf("%s is not a valid mapping. Choose 'tcp', 'http' or 'http2'.", service.Protocol)
+	} else if service.Protocol != "" && service.Protocol != "tcp" && service.Protocol != "udp" && service.Protocol != "http" && service.Protocol != "http2" {
+		return fmt.Errorf("%s is not a valid mapping. Choose 'tcp', 'udp, 'http' or 'http2'.", service.Protocol)
+	} else if (service.Multicast && service.Protocol != "udp") {
+		return fmt.Errorf("The multicast option is only valid for udp")
 	} else if service.Aggregate != "" && service.Protocol != "http" {
 		return fmt.Errorf("The aggregate option is currently only valid for http")
 	} else if service.EventChannel && service.Protocol != "http" {

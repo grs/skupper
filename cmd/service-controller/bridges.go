@@ -52,6 +52,26 @@ func (a Bridge) equivalent(b Bridge) bool {
 	return a.Host == b.Host && a.Port == b.Port && a.Address == b.Address && a.SiteId == b.SiteId
 }
 
+type UdpBridge struct {
+	Bridge
+	Multicast    bool
+}
+
+func (b *UdpBridge) toMap() map[string]interface{} {
+	return map[string]interface{}{
+		"name":         b.Name,
+		"host":         b.Host,
+		"port":         b.Port,
+		"address":      b.Address,
+		"siteId":       b.SiteId,
+		"multicast":    b.Multicast,
+	}
+}
+
+func (a UdpBridge) equivalent(b UdpBridge) bool {
+	return a.Host == b.Host && a.Port == b.Port && a.Address == b.Address && a.SiteId == b.SiteId && a.Multicast == b.Multicast
+}
+
 type HttpBridge struct {
 	Bridge
 	Http2        bool
@@ -82,6 +102,8 @@ type BridgeMap map[string]Bridge
 type HttpBridgeMap map[string]HttpBridge
 type NestedBridgeMap map[string]BridgeMap
 type NestedHttpBridgeMap map[string]HttpBridgeMap
+type UdpBridgeMap map[string]UdpBridge
+type NestedUdpBridgeMap map[string]UdpBridgeMap
 
 type BridgeConfiguration struct {
 	HttpConnectors  NestedHttpBridgeMap
@@ -90,6 +112,8 @@ type BridgeConfiguration struct {
 	TcpListeners    BridgeMap
 	Http2Connectors NestedHttpBridgeMap
 	Http2Listeners  HttpBridgeMap
+	UdpConnectors   NestedUdpBridgeMap
+	UdpListeners    UdpBridgeMap
 }
 
 type EgressBindings struct {
@@ -109,6 +133,7 @@ type ServiceBindings struct {
 	ingressPort  int
 	aggregation  string
 	eventChannel bool
+	multicast    bool
 	headless     *types.Headless
 	targets      map[string]*EgressBindings
 }
@@ -120,6 +145,7 @@ func asServiceInterface(bindings *ServiceBindings) types.ServiceInterface {
 		Port:         bindings.publicPort,
 		Aggregate:    bindings.aggregation,
 		EventChannel: bindings.eventChannel,
+		Multicast:    bindings.multicast,
 		Headless:     bindings.headless,
 		Origin:       bindings.origin,
 	}
@@ -180,7 +206,7 @@ func (c *Controller) updateServiceBindings(required types.ServiceInterface, port
 				return err
 			}
 		}
-		sb := newServiceBindings(required.Origin, required.Protocol, required.Address, required.Port, required.Headless, port, required.Aggregate, required.EventChannel)
+		sb := newServiceBindings(required.Origin, required.Protocol, required.Address, required.Port, required.Headless, port, required.Aggregate, required.EventChannel, required.Multicast)
 		for _, t := range required.Targets {
 			if t.Selector != "" {
 				sb.addSelectorTarget(t.Name, t.Selector, getTargetPort(required, t), c)
@@ -202,6 +228,9 @@ func (c *Controller) updateServiceBindings(required types.ServiceInterface, port
 		}
 		if bindings.eventChannel != required.EventChannel {
 			bindings.eventChannel = required.EventChannel
+		}
+		if bindings.multicast != required.Multicast {
+			bindings.multicast = required.Multicast
 		}
 		if required.Headless != nil {
 			if bindings.headless == nil {
@@ -249,7 +278,7 @@ func (c *Controller) updateServiceBindings(required types.ServiceInterface, port
 	return nil
 }
 
-func newServiceBindings(origin string, protocol string, address string, publicPort int, headless *types.Headless, ingressPort int, aggregation string, eventChannel bool) *ServiceBindings {
+func newServiceBindings(origin string, protocol string, address string, publicPort int, headless *types.Headless, ingressPort int, aggregation string, eventChannel bool, multicast bool) *ServiceBindings {
 	return &ServiceBindings{
 		origin:       origin,
 		protocol:     protocol,
@@ -258,6 +287,7 @@ func newServiceBindings(origin string, protocol string, address string, publicPo
 		ingressPort:  ingressPort,
 		aggregation:  aggregation,
 		eventChannel: eventChannel,
+		multicast:    multicast,
 		headless:     headless,
 		targets:      map[string]*EgressBindings{},
 	}
@@ -313,7 +343,7 @@ func (sb *ServiceBindings) updateBridgeConfiguration(siteId string, bridges *Bri
 	if sb.headless == nil {
 		addIngressBridge(sb, siteId, bridges)
 		for _, eb := range sb.targets {
-			eb.updateBridgeConfiguration(sb.protocol, sb.address, siteId, bridges)
+			eb.updateBridgeConfiguration(sb.protocol, sb.address, siteId, sb.multicast, bridges)
 		}
 	} // headless proxies are not specified through the main bridge configuration
 }
@@ -330,16 +360,20 @@ func (eb *EgressBindings) stop() {
 	close(eb.stopper)
 }
 
-func (eb *EgressBindings) updateBridgeConfiguration(protocol string, address string, siteId string, bridges *BridgeConfiguration) {
+func qualifiedTargetName(name string, address string) string {
+	return address + "." + name
+}
+
+func (eb *EgressBindings) updateBridgeConfiguration(protocol string, address string, siteId string, multicast bool, bridges *BridgeConfiguration) {
 	if eb.selector != "" {
 		pods := eb.informer.GetStore().List()
 		for _, p := range pods {
 			pod := p.(*corev1.Pod)
 			log.Printf("Adding pod for %s: %s", address, pod.ObjectMeta.Name)
-			addEgressBridge(protocol, pod.Status.PodIP, eb.egressPort, address, eb.name, siteId, "", bridges)
+			addEgressBridge(protocol, pod.Status.PodIP, eb.egressPort, address, qualifiedTargetName(eb.name, address), siteId, "", multicast, bridges)
 		}
 	} else if eb.service != "" {
-		addEgressBridge(protocol, eb.service, eb.egressPort, address, eb.name, siteId, eb.service, bridges)
+		addEgressBridge(protocol, eb.service, eb.egressPort, address, qualifiedTargetName(eb.name, address), siteId, eb.service, multicast, bridges)
 	}
 }
 
@@ -351,6 +385,8 @@ func newBridgeConfiguration() *BridgeConfiguration {
 		Http2Listeners:  make(map[string]HttpBridge),
 		TcpConnectors:   make(map[string]BridgeMap),
 		TcpListeners:    make(map[string]Bridge),
+		UdpConnectors:   make(map[string]UdpBridgeMap),
+		UdpListeners:    make(map[string]UdpBridge),
 	}
 }
 
@@ -405,6 +441,25 @@ func (bc *BridgeConfiguration) addBridgeFromMap(entityType string, attributes ma
 			bc.Http2Listeners[bridge.Address] = bridge
 		default:
 		}
+	} else if isUdpBridgeEntity(entityType) {
+		bridge := UdpBridge{
+			Bridge: Bridge{
+				Name:    getStringByKey(attributes, "name"),
+				Host:    getStringByKey(attributes, "host"),
+				Port:    getIntByKey(attributes, "port"),
+				Address: getStringByKey(attributes, "address"),
+				SiteId:  getStringByKey(attributes, "siteId"),
+			},
+			Multicast:       getBoolByKey(attributes, "multicast"),
+		}
+		bridge.checkName()
+		switch entityType {
+		case "udpConnector":
+			bc.UdpConnectors.add(bridge)
+		case "udpListener":
+			bc.UdpListeners[bridge.Address] = bridge
+		default:
+		}
 	} else {
 		bridge := Bridge{
 			Name:    getStringByKey(attributes, "name"),
@@ -431,7 +486,17 @@ func isBridgeEntity(typename string) bool {
 		"tcpConnector":
 		return true
 	}
-	return isHttpBridgeEntity(typename)
+	return isUdpBridgeEntity(typename) || isHttpBridgeEntity(typename)
+}
+
+func isUdpBridgeEntity(typename string) bool {
+	switch typename {
+	case
+		"udpListener",
+		"udpConnector":
+		return true
+	}
+	return false
 }
 
 func isHttpBridgeEntity(typename string) bool {
@@ -450,6 +515,7 @@ const (
 	ProtocolTCP   string = "tcp"
 	ProtocolHTTP  string = "http"
 	ProtocolHTTP2 string = "http2"
+	ProtocolUDP   string = "udp"
 )
 
 func (m NestedBridgeMap) add(b Bridge) {
@@ -474,7 +540,18 @@ func (m NestedHttpBridgeMap) add(b HttpBridge) {
 	}
 }
 
-func addEgressBridge(protocol string, host string, port int, address string, target string, siteId string, hostOverride string, bridges *BridgeConfiguration) (bool, error) {
+func (m NestedUdpBridgeMap) add(b UdpBridge) {
+	nm := m[b.Address]
+	if nm == nil {
+		m[b.Address] = UdpBridgeMap{
+			b.Host: b,
+		}
+	} else {
+		nm[b.Host] = b
+	}
+}
+
+func addEgressBridge(protocol string, host string, port int, address string, target string, siteId string, hostOverride string, multicast bool, bridges *BridgeConfiguration) (bool, error) {
 	switch protocol {
 	case ProtocolHTTP:
 		b := HttpBridge{
@@ -508,6 +585,18 @@ func addEgressBridge(protocol string, host string, port int, address string, tar
 			Address: address,
 			SiteId:  siteId,
 		})
+	case ProtocolUDP:
+		b := UdpBridge{
+			Bridge: Bridge{
+				Name:    getBridgeName(target, host),
+				Host:    host,
+				Port:    port,
+				Address: address,
+				SiteId:  siteId,
+			},
+			Multicast:       multicast,
+		}
+		bridges.UdpConnectors.add(b)
 	default:
 		return false, fmt.Errorf("Unrecognised protocol for service %s: %s", address, protocol)
 	}
@@ -547,6 +636,17 @@ func addIngressBridge(sb *ServiceBindings, siteId string, bridges *BridgeConfigu
 			Port:    sb.ingressPort,
 			Address: sb.address,
 			SiteId:  siteId,
+		}
+	case ProtocolUDP:
+		bridges.UdpListeners[sb.address] = UdpBridge{
+			Bridge: Bridge{
+				Name:    getBridgeName(sb.address, ""),
+				Host:    "0.0.0.0",
+				Port:    sb.ingressPort,
+				Address: sb.address,
+				SiteId:  siteId,
+			},
+			Multicast:  sb.multicast,
 		}
 	default:
 		return false, fmt.Errorf("Unrecognised protocol for service %s: %s", sb.address, sb.protocol)
@@ -640,6 +740,20 @@ func writeBridgeConfiguration(bridges *BridgeConfiguration) ([]byte, error) {
 			b.toMap(),
 		})
 	}
+	for _, m := range bridges.UdpConnectors {
+		for _, b := range m {
+			elements = append(elements, []interface{}{
+				"udpConnector",
+				b.toMap(),
+			})
+		}
+	}
+	for _, b := range bridges.UdpListeners {
+		elements = append(elements, []interface{}{
+			"udpListener",
+			b.toMap(),
+		})
+	}
 	return json.Marshal(elements)
 }
 
@@ -699,6 +813,35 @@ func (a NestedHttpBridgeMap) equivalent(b NestedHttpBridgeMap) bool {
 	return true
 }
 
+
+func (a UdpBridgeMap) equivalent(b UdpBridgeMap) bool {
+	for k, v := range a {
+		if !v.equivalent(b[k]) {
+			return false
+		}
+	}
+	for k, v := range b {
+		if !v.equivalent(a[k]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a NestedUdpBridgeMap) equivalent(b NestedUdpBridgeMap) bool {
+	for k, v := range a {
+		if !v.equivalent(b[k]) {
+			return false
+		}
+	}
+	for k, v := range b {
+		if !v.equivalent(a[k]) {
+			return false
+		}
+	}
+	return true
+}
+
 func updateBridgeConfiguration(desired *BridgeConfiguration, actual *BridgeConfiguration) bool {
 	if !desired.HttpConnectors.equivalent(actual.HttpConnectors) {
 		return true
@@ -716,6 +859,12 @@ func updateBridgeConfiguration(desired *BridgeConfiguration, actual *BridgeConfi
 		return true
 	}
 	if !desired.Http2Listeners.equivalent(actual.Http2Listeners) {
+		return true
+	}
+	if !desired.UdpConnectors.equivalent(actual.UdpConnectors) {
+		return true
+	}
+	if !desired.UdpListeners.equivalent(actual.UdpListeners) {
 		return true
 	}
 	return false

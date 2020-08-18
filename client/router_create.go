@@ -72,11 +72,19 @@ func (cli *VanClient) GetVanControllerSpec(options types.SiteConfigSpec, van *ty
 		proxyImage = types.DefaultProxyImage
 	}
 
+	var bridgeServerImage string
+	if os.Getenv("SKUPPER_BRIDGE_SERVER_IMAGE") != "" {
+		bridgeServerImage = os.Getenv("SKUPPER_BRIDGE_SERVER_IMAGE")
+	} else {
+		bridgeServerImage = types.DefaultBridgeServerImage
+	}
+
 	envVars := []corev1.EnvVar{}
 	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_NAMESPACE", Value: van.Namespace})
 	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_SITE_NAME", Value: van.Name})
 	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_SITE_ID", Value: siteId})
 	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_PROXY_IMAGE", Value: proxyImage})
+	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_BRIDGE_SERVER_IMAGE", Value: bridgeServerImage})
 	envVars = append(envVars, corev1.EnvVar{Name: "SKUPPER_SERVICE_ACCOUNT", Value: "skupper"})
 	envVars = append(envVars, corev1.EnvVar{Name: "OWNER_NAME", Value: transport.ObjectMeta.Name})
 	envVars = append(envVars, corev1.EnvVar{Name: "OWNER_UID", Value: string(transport.ObjectMeta.UID)})
