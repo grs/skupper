@@ -49,8 +49,7 @@ const (
 	TransportViewRoleName       string = "skupper-view"
 	TransportEnvConfig          string = "QDROUTERD_CONF"
 	TransportSaslConfig         string = "skupper-sasl-config"
-	DefaultBridgeServerImage    string = "quay.io/skupper/bridge-server"
-	BridgeServerContainerName   string = "bridge-server"
+	TransportConfigFile         string = "qdrouterd.json"
 )
 
 var TransportViewPolicyRule = []rbacv1.PolicyRule{
@@ -172,7 +171,7 @@ type RouterSpec struct {
 	AuthMode       ConsoleAuthMode `json:"authMode,omitempty"`
 	Transport      DeploymentSpec  `json:"transport,omitempty"`
 	Controller     DeploymentSpec  `json:"controller,omitempty"`
-	Assembly       AssemblySpec    `json:"assembly,omitempty"`
+	RouterConfig   string          `json:"routerConfig,omitempty"`
 	Users          []User          `json:"users,omitempty"`
 	CertAuthoritys []CertAuthority `json:"certAuthoritys,omitempty"`
 	Credentials    []Credential    `json:"credentials,omitempty"`

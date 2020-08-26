@@ -393,7 +393,6 @@ func NewTransportDeployment(van *types.RouterSpec, ownerRef *metav1.OwnerReferen
 						ServiceAccountName: types.TransportServiceAccountName,
 						Containers: []corev1.Container{
 							ContainerForTransport(van.Transport),
-							ContainerForBridgeServer(),
 						},
 					},
 				},

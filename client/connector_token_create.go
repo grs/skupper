@@ -99,36 +99,39 @@ func configureHostPorts(result *RouterHostPorts, cli *VanClient) bool {
 
 func (cli *VanClient) ConnectorTokenCreate(ctx context.Context, subject string) (*corev1.Secret, bool, error) {
 	// verify that the local deployment is interior mode
-	current, err := kube.GetDeployment(types.TransportDeploymentName, cli.Namespace, cli.KubeClient)
 	// TODO: return error message for all the paths
-	if err == nil {
-		if qdr.IsInterior(current) {
-			//TODO: creat const for ca
-			caSecret, err := cli.KubeClient.CoreV1().Secrets(cli.Namespace).Get("skupper-internal-ca", metav1.GetOptions{})
-			if err == nil {
-				//get the host and port for inter-router and edge
-				var hostPorts RouterHostPorts
-				if configureHostPorts(&hostPorts, cli) {
-					secret := certs.GenerateSecret(subject, subject, hostPorts.Hosts, caSecret)
-					annotateConnectionToken(&secret, "inter-router", hostPorts.InterRouter.Host, hostPorts.InterRouter.Port)
-					annotateConnectionToken(&secret, "edge", hostPorts.Edge.Host, hostPorts.Edge.Port)
-					if secret.ObjectMeta.Labels == nil {
-						secret.ObjectMeta.Labels = map[string]string{}
-					}
-					secret.ObjectMeta.Labels[types.SkupperTypeQualifier] = types.TypeToken
-					return &secret, hostPorts.LocalOnly, nil
-				} else {
-					//TODO: return the actual error
-					return nil, false, fmt.Errorf("Could not determine host/ports for token")
+	configmap, err := kube.GetConfigMap("skupper-internal", cli.Namespace, cli.KubeClient)
+	if err != nil {
+		return nil, false, err
+	}
+	current, err := qdr.GetRouterConfigFromConfigMap(configmap)
+	if err != nil {
+		return nil, false, err
+	}
+	if current.IsEdge() {
+		return nil, false, fmt.Errorf("Edge configuration cannot accept connections")
+	} else {
+		//TODO: creat const for ca
+		caSecret, err := cli.KubeClient.CoreV1().Secrets(cli.Namespace).Get("skupper-internal-ca", metav1.GetOptions{})
+		if err == nil {
+			//get the host and port for inter-router and edge
+			var hostPorts RouterHostPorts
+			if configureHostPorts(&hostPorts, cli) {
+				secret := certs.GenerateSecret(subject, subject, hostPorts.Hosts, caSecret)
+				annotateConnectionToken(&secret, "inter-router", hostPorts.InterRouter.Host, hostPorts.InterRouter.Port)
+				annotateConnectionToken(&secret, "edge", hostPorts.Edge.Host, hostPorts.Edge.Port)
+				if secret.ObjectMeta.Labels == nil {
+					secret.ObjectMeta.Labels = map[string]string{}
 				}
+				secret.ObjectMeta.Labels[types.SkupperTypeQualifier] = types.TypeToken
+				return &secret, hostPorts.LocalOnly, nil
 			} else {
-				return nil, false, err
+				//TODO: return the actual error
+				return nil, false, fmt.Errorf("Could not determine host/ports for token")
 			}
 		} else {
-			return nil, false, fmt.Errorf("Edge configuration cannot accept connections")
+			return nil, false, err
 		}
-	} else {
-		return nil, false, err
 	}
 }
 

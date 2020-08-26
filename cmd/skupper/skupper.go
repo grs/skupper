@@ -358,7 +358,7 @@ func main() {
 
 			if args[0] == "all" {
 				vcis, err := cli.ConnectorList(context.Background())
-				if err == nil {
+				if check(err) {
 					for _, vci := range vcis {
 						connectors = append(connectors, &types.ConnectorInspectResponse{
 							Connector: vci,
@@ -368,7 +368,7 @@ func main() {
 				}
 			} else {
 				vci, err := cli.ConnectorInspect(context.Background(), args[0])
-				if err == nil {
+				if check(err) {
 					connectors = append(connectors, vci)
 					if vci.Connected {
 						connected++

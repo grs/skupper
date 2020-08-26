@@ -27,6 +27,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/kube"
+	"github.com/skupperproject/skupper/pkg/qdr"
 )
 
 type Controller struct {
@@ -55,6 +56,7 @@ type Controller struct {
 	definitionMonitor *DefinitionMonitor
 	consoleServer     *ConsoleServer
 	siteQueryServer   *SiteQueryServer
+	configSync        *ConfigSync
 }
 
 func hasProxyAnnotation(service corev1.Service) bool {
@@ -144,6 +146,7 @@ func NewController(cli *client.VanClient, origin string, tlsConfig *tls.Config) 
 	controller.siteQueryServer = newSiteQueryServer(tlsConfig)
 
 	controller.definitionMonitor = newDefinitionMonitor(controller.origin, controller.vanClient, controller.svcDefInformer, controller.svcInformer)
+	controller.configSync = newConfigSync(controller.bridgeDefInformer, tlsConfig)
 	return controller, nil
 }
 
@@ -259,10 +262,12 @@ func (c *Controller) Run(stopCh <-chan struct{}) error {
 	go wait.Until(c.runServiceCtrl, time.Second, stopCh)
 	c.definitionMonitor.start(stopCh)
 	c.consoleServer.start(stopCh)
+	c.configSync.start(stopCh)
 
 	log.Println("Started workers")
 	<-stopCh
 	log.Println("Shutting down workers")
+	c.configSync.stop()
 	c.definitionMonitor.stop()
 
 	return nil
@@ -440,32 +445,7 @@ func (c *Controller) runServiceCtrl() {
 	}
 }
 
-const (
-	BRIDGE_CONFIG = "bridges.json"
-)
-
-func (c *Controller) getRequiredBridgeConfig() (string, error) {
-	bridges := requiredBridges(c.bindings, c.origin)
-	config, err := writeBridgeConfiguration(bridges)
-	if err != nil {
-		return "", fmt.Errorf("Error writing json for bridge config %s", err)
-	} else {
-		return string(config), nil
-	}
-}
-
-func (c *Controller) getRequiredBridgeConfigAsMap() (map[string]string, error) {
-	val, err := c.getRequiredBridgeConfig()
-	if err != nil {
-		return nil, err
-	} else {
-		return map[string]string{
-			BRIDGE_CONFIG: val,
-		}, nil
-	}
-}
-
-func (c *Controller) getInitialBridgeConfig() (*BridgeConfiguration, error) {
+func (c *Controller) getInitialBridgeConfig() (*qdr.BridgeConfig, error) {
 	name := c.namespaced("skupper-internal")
 	obj, exists, err := c.bridgeDefInformer.GetStore().GetByKey(name)
 	if err != nil {
@@ -475,16 +455,7 @@ func (c *Controller) getInitialBridgeConfig() (*BridgeConfiguration, error) {
 		if !ok {
 			return nil, fmt.Errorf("Expected ConfigMap for %s but got %#v", name, obj)
 		}
-		if cm.Data == nil || cm.Data[BRIDGE_CONFIG] == "" {
-			return nil, nil
-		} else {
-			log.Printf("Reading initial bridge configuration: %s", cm.Data[BRIDGE_CONFIG])
-			currentBridges, err := readBridgeConfiguration([]byte(cm.Data[BRIDGE_CONFIG]))
-			if err != nil {
-				return nil, fmt.Errorf("Error reading bridge config from %s: %v", name, err.Error())
-			}
-			return currentBridges, nil
-		}
+		return qdr.GetBridgeConfigFromConfigMap(cm)
 	} else {
 		return nil, nil
 	}
@@ -494,38 +465,17 @@ func (c *Controller) updateBridgeConfig(name string) error {
 	obj, exists, err := c.bridgeDefInformer.GetStore().GetByKey(name)
 	if err != nil {
 		return fmt.Errorf("Error reading skupper-internal from cache: %s", err)
-	} else if exists {
+	} else if !exists {
+		return fmt.Errorf("skupper-internal does not exist: %v", err.Error())
+	} else {
 		cm, ok := obj.(*corev1.ConfigMap)
 		if !ok {
 			return fmt.Errorf("Expected ConfigMap for %s but got %#v", name, obj)
 		}
-		var update bool
-		if cm.Data == nil {
-			cm.Data, err = c.getRequiredBridgeConfigAsMap()
-			if err != nil {
-				return fmt.Errorf("Error building required bridge config: %v", err.Error())
-			}
-			update = true
-		} else if cm.Data[BRIDGE_CONFIG] == "" {
-			cm.Data[BRIDGE_CONFIG], err = c.getRequiredBridgeConfig()
-			if err != nil {
-				return fmt.Errorf("Error building required bridge config: %v", err.Error())
-			}
-			update = true
-		} else {
-			desiredBridges := requiredBridges(c.bindings, c.origin)
-			currentBridges, err := readBridgeConfiguration([]byte(cm.Data[BRIDGE_CONFIG]))
-			if err != nil {
-				return fmt.Errorf("Error reading bridge config from %s: %v", name, err.Error())
-			}
-			if updateBridgeConfiguration(desiredBridges, currentBridges) {
-				update = true
-				config, err := writeBridgeConfiguration(desiredBridges)
-				if err != nil {
-					return fmt.Errorf("Error writing json for bridge config %s", err)
-				}
-				cm.Data[BRIDGE_CONFIG] = string(config)
-			}
+		desiredBridges := requiredBridges(c.bindings, c.origin)
+		update, err := desiredBridges.UpdateConfigMap(cm)
+		if err != nil {
+			return fmt.Errorf("Error updating %s: %s", cm.ObjectMeta.Name, err)
 		}
 		if update {
 			log.Printf("Updating %s", cm.ObjectMeta.Name)
@@ -533,15 +483,6 @@ func (c *Controller) updateBridgeConfig(name string) error {
 			if err != nil {
 				return fmt.Errorf("Failed to update %s: %v", name, err.Error())
 			}
-		}
-	} else {
-		data, err := c.getRequiredBridgeConfigAsMap()
-		if err != nil {
-			return fmt.Errorf("Error building required bridge config: %v", err.Error())
-		}
-		_, err = kube.NewConfigMap("skupper-internal" /*TODO define constant*/, &data, getOwnerReference(), c.vanClient.Namespace, c.vanClient.KubeClient)
-		if err != nil {
-			return err
 		}
 	}
 	return nil
