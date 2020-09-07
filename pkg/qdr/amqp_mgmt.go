@@ -759,17 +759,79 @@ func (a *Agent) UpdateLocalBridgeConfig(changes *BridgeConfigDifference) error {
 	return nil
 }
 
-func (a *Agent) GetBridges(routers []Router) ([]Record, error) {
-	queries := queryAllAgentsForAllTypes(getBridgeTypes(), getBridgeServerAddressesFor(routers))
+func (a *Agent) GetBridges(routers []Router) ([]BridgeConfig, error) {
+	configs := []BridgeConfig{}
+	agents := getAddressesFor(routers)
+	for _, agent := range agents {
+		config := NewBridgeConfig()
+
+		results, err := a.QueryByAgentAddress("org.apache.qpid.dispatch.tcpConnector", []string{}, agent)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range results {
+			config.AddTcpConnector(asTcpEndpoint(record))
+		}
+		results, err = a.QueryByAgentAddress("org.apache.qpid.dispatch.tcpListener", []string{}, agent)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range results {
+			config.AddTcpListener(asTcpEndpoint(record))
+		}
+		results, err = a.QueryByAgentAddress("org.apache.qpid.dispatch.httpConnector", []string{}, agent)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range results {
+			config.AddHttpConnector(asHttpEndpoint(record))
+		}
+
+		results, err = a.QueryByAgentAddress("org.apache.qpid.dispatch.httpListener", []string{}, agent)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range results {
+			config.AddHttpListener(asHttpEndpoint(record))
+		}
+
+		configs = append(configs, config)
+	}
+	return configs, nil
+}
+
+type TcpConnection struct {
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Address   string `json:"address"`
+	Direction string `json:"direction"`
+	BytesIn   int    `json:"bytesIn"`
+	BytesOut  int    `json:"bytesOut"`
+	Uptime    uint64 `json:"uptimeSeconds"`
+	LastIn    uint64 `json:"lastInSeconds"`
+	LastOut   uint64 `json:"lastOutSeconds"`
+}
+
+func (a *Agent) GetTcpConnections(routers []Router) ([][]TcpConnection, error) {
+	queries := queryAllAgents("org.apache.qpid.dispatch.tcpConnection", getAddressesFor(routers))
 	results, err := a.BatchQuery(queries)
 	if err != nil {
 		return nil, err
 	}
-	flattened := []Record{}
+	converted := [][]TcpConnection{}
 	for _, records := range results {
-		flattened = append(flattened, records...)
+		conns := []TcpConnection{}
+		for _, record := range records {
+			var conn TcpConnection
+			//simple := map[string]interface{}(record)
+			if err := convert(record, &conn); err != nil {
+				return converted, fmt.Errorf("Failed to convert to TcpConnection: %s", err)
+			}
+			conns = append(conns, conn)
+		}
+		converted = append(converted, conns)
 	}
-	return flattened, nil
+	return converted, nil
 }
 
 func (a *Agent) getAllEdgeRouters(agents []string) ([]Router, error) {

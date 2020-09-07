@@ -232,6 +232,7 @@ type HttpEndpoint struct {
 	EventChannel    bool   `json:"eventChannel,omitempty"`
 	HostOverride    string `json:"hostOverride,omitempty"`
 }
+
 func convert(from interface{}, to interface{}) error {
 	data, err := json.Marshal(from)
 	if err != nil {
