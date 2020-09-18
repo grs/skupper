@@ -395,6 +395,14 @@ func getServiceStats(bridges []qdr.BridgeConfig, sites []Site, tcpconnections []
 	return services
 }
 
+func getPeerIdentifier(addr string, iplookup *IpLookup) string {
+	parts := strings.Split(addr, ":")
+	peer := iplookup.getPodName(parts[0])
+	if peer == "" {
+		peer = parts[0]
+	}
+	return peer
+}
 
 type ConnectionStatsIndex map[string]map[string]ConnectionStats
 
@@ -407,11 +415,11 @@ func asConnectionStats(connection *qdr.TcpConnection, iplookup *IpLookup) Connec
 		BytesIn:   connection.BytesIn,
 		BytesOut:  connection.BytesOut,
 	}
+	peer := getPeerIdentifier(connection.Host, iplookup)
 	if connection.Direction == "in" {
-		stats.Client = iplookup.getPodName(connection.Host)
-
+		stats.Client = peer
 	} else {
-		stats.Server = iplookup.getPodName(connection.Host)
+		stats.Server = peer
 	}
 	return stats
 }

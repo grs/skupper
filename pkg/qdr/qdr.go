@@ -526,10 +526,10 @@ func (a TcpEndpointMap) Difference(b TcpEndpointMap) (TcpEndpointDifference) {
 			result.Added = append(result.Added, v1)
 		}
 	}
-	for key, _ := range a {
-		v2, ok := b[key]
+	for key, v1 := range a {
+		_, ok := b[key]
 		if !ok {
-			result.Deleted = append(result.Deleted, v2.Name)
+			result.Deleted = append(result.Deleted, v1.Name)
 		}
 	}
 	return result

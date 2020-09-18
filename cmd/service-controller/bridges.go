@@ -287,6 +287,9 @@ const (
 )
 
 func addEgressBridge(protocol string, host string, port int, address string, target string, siteId string, hostOverride string, bridges *qdr.BridgeConfig) (bool, error) {
+	if host == "" {
+		return false, fmt.Errorf("Cannot add connector without host (%s %s)", address, protocol)
+	}
 	switch protocol {
 	case ProtocolHTTP:
 		b := qdr.HttpEndpoint{
