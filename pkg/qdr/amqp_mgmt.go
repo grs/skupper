@@ -834,6 +834,40 @@ func (a *Agent) GetTcpConnections(routers []Router) ([][]TcpConnection, error) {
 	return converted, nil
 }
 
+type HttpRequestInfo struct {
+	Name       string `json:"name"`
+	Host       string `json:"host"`
+	Address    string `json:"address"`
+	Site       string `json:"site"`
+	Direction  string `json:"direction"`
+	Requests   int    `json:"requests"`
+	BytesIn    int    `json:"bytesIn"`
+	BytesOut   int    `json:"bytesOut"`
+	MaxLatency int    `json:"maxLatency"`
+	Details    map[string]int `json:"details"`
+}
+
+func (a *Agent) GetHttpRequestInfo(routers []Router) ([][]HttpRequestInfo, error) {
+	queries := queryAllAgents("org.apache.qpid.dispatch.httpRequestInfo", getAddressesFor(routers))
+	results, err := a.BatchQuery(queries)
+	if err != nil {
+		return nil, err
+	}
+	converted := [][]HttpRequestInfo{}
+	for _, records := range results {
+		reqs := []HttpRequestInfo{}
+		for _, record := range records {
+			var req HttpRequestInfo
+			if err := convert(record, &req); err != nil {
+				return converted, fmt.Errorf("Failed to convert to HttpRequestInfo: %s", err)
+			}
+			reqs = append(reqs, req)
+		}
+		converted = append(converted, reqs)
+	}
+	return converted, nil
+}
+
 func (a *Agent) getAllEdgeRouters(agents []string) ([]Router, error) {
 	edges := []Router{}
 
