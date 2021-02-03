@@ -122,7 +122,7 @@ func deducePort(deployment *appsv1.Deployment) int {
 			return 0
 		}
 	} else {
-		return int(kube.GetContainerPort(deployment))
+		return int(kube.GetContainerPort(deployment.Spec.Template))
 	}
 }
 
@@ -134,7 +134,7 @@ func deducePortFromStatefulSet(statefulSet *appsv1.StatefulSet) int {
 			return 0
 		}
 	} else {
-		return int(kube.GetContainerPortForStatefulSet(statefulSet))
+		return int(kube.GetContainerPort(statefulSet.Spec.Template))
 	}
 }
 
@@ -146,7 +146,7 @@ func deducePortFromDaemonSet(daemonSet *appsv1.DaemonSet) int {
 			return 0
 		}
 	} else {
-		return int(kube.GetContainerPortForDaemonSet(daemonSet))
+		return int(kube.GetContainerPort(daemonSet.Spec.Template))
 	}
 }
 
