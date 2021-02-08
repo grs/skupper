@@ -319,25 +319,9 @@ func NewTransportDeployment(van *types.RouterSpec, ownerRef *metav1.OwnerReferen
 	}
 }
 
-func GetContainerPort(deployment *appsv1.Deployment) int32 {
-	if len(deployment.Spec.Template.Spec.Containers) > 0 && len(deployment.Spec.Template.Spec.Containers[0].Ports) > 0 {
-		return deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
-	} else {
-		return 0
-	}
-}
-
-func GetContainerPortForStatefulSet(statefulSet *appsv1.StatefulSet) int32 {
-	if len(statefulSet.Spec.Template.Spec.Containers) > 0 && len(statefulSet.Spec.Template.Spec.Containers[0].Ports) > 0 {
-		return statefulSet.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
-	} else {
-		return 0
-	}
-}
-
-func GetContainerPortForDaemonSet(daemonSet *appsv1.DaemonSet) int32 {
-	if len(daemonSet.Spec.Template.Spec.Containers) > 0 && len(daemonSet.Spec.Template.Spec.Containers[0].Ports) > 0 {
-		return daemonSet.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
+func GetContainerPort(template corev1.PodTemplateSpec) int32 {
+	if len(template.Spec.Containers) > 0 && len(template.Spec.Containers[0].Ports) > 0 {
+		return template.Spec.Containers[0].Ports[0].ContainerPort
 	} else {
 		return 0
 	}
