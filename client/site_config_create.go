@@ -63,6 +63,9 @@ func (cli *VanClient) SiteConfigCreate(ctx context.Context, spec types.SiteConfi
 	if spec.Ingress != "" {
 		siteConfig.Data["ingress"] = spec.Ingress
 	}
+	if spec.ConsoleIngress != "" {
+		siteConfig.Data["console-ingress"] = spec.ConsoleIngress
+	}
 	if spec.RouterLogging != nil {
 		siteConfig.Data["router-logging"] = RouterLogConfigToString(spec.RouterLogging)
 	}
