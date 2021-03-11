@@ -137,6 +137,8 @@ const (
 	TokenGeneratedBy            string = BaseQualifier + "/generated-by"
 	TokenCost                   string = BaseQualifier + "/cost"
 	UpdatedAnnotation           string = InternalQualifier + "/updated"
+	ComponentAnnotation         string = BaseQualifier + "/component"
+	RouterComponent             string = "router"
 )
 
 // Service Interface constants
