@@ -1,6 +1,6 @@
 package client
 
 const (
-	DefaultRouterImage            string = "quay.io/interconnectedcloud/qdrouterd:nightly"
-	DefaultServiceControllerImage string = "quay.io/skupper/service-controller:0.5"
+	DefaultRouterImage            string = "quay.io/gordons/qdrouterd"
+	DefaultServiceControllerImage string = "quay.io/gordons/service-controller"
 )
