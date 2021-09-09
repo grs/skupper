@@ -1,4 +1,4 @@
-package main
+package kube
 
 import (
 	"bytes"
@@ -64,7 +64,7 @@ func TestSecretController(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	controller := NewSecretController("test", "foo=bar", kube, namespace, handler)
 	stop := make(chan struct{})
-	controller.start(stop)
+	controller.Start(stop)
 
 	name := "my-secret"
 	secret := newTestSecret(name)
@@ -93,6 +93,6 @@ func TestSecretController(t *testing.T) {
 	assert.Assert(t, event.Secret == nil, namespace)
 	assert.Equal(t, event.Name, namespace+"/"+name, namespace)
 
-	controller.stop()
+	controller.Stop()
 	close(stop)
 }

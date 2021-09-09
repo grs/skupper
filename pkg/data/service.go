@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/pkg/qdr"
+	"github.com/skupperproject/skupper/pkg/types"
 )
 
 type Service struct {
@@ -218,4 +218,38 @@ func (detail *ServiceDetail) ExtractHttpConnectorPorts(connectors []qdr.HttpEndp
 		}
 	}
 	detail.EgressBindings = hosts.asEgressBindings()
+}
+
+func (detail *ServiceDetail) LookupRouterBindings(agent *qdr.Agent) {
+	if detail.Definition.Protocol == "tcp" {
+		listeners, err := agent.GetLocalTcpListeners(getTcpAddressFilter(detail.Definition.Address))
+		if err != nil {
+			detail.AddObservation(fmt.Sprintf("Error retrieving tcp listeners: %s", err))
+		} else {
+			detail.ExtractTcpListenerPorts(listeners)
+		}
+
+		connectors, err := agent.GetLocalTcpConnectors(getTcpAddressFilter(detail.Definition.Address))
+		if err != nil {
+			detail.AddObservation(fmt.Sprintf("Error retrieving tcp connectors for %s: %s", detail.Definition.Address, err))
+		} else {
+			detail.ExtractTcpConnectorPorts(connectors)
+		}
+	} else if detail.Definition.Protocol == "http" || detail.Definition.Protocol == "http2" {
+		listeners, err := agent.GetLocalHttpListeners(getHttpAddressFilter(detail.Definition.Address))
+		if err != nil {
+			detail.AddObservation(fmt.Sprintf("Error retrieving http listeners: %s", err))
+		} else {
+			detail.ExtractHttpListenerPorts(listeners)
+		}
+
+		connectors, err := agent.GetLocalHttpConnectors(getHttpAddressFilter(detail.Definition.Address))
+		if err != nil {
+			detail.AddObservation(fmt.Sprintf("Error retrieving http connectors for %s: %s", detail.Definition.Address, err))
+		} else {
+			detail.ExtractHttpConnectorPorts(connectors)
+		}
+	} else {
+		detail.AddObservation(fmt.Sprintf("Unrecognised protocol: %s", detail.Definition.Protocol))
+	}
 }

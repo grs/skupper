@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"math"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
-	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/pkg/event"
 	"github.com/skupperproject/skupper/pkg/qdr"
 )
@@ -25,10 +23,10 @@ type ConfigSync struct {
 	agentPool *qdr.AgentPool
 }
 
-func newConfigSync(configInformer cache.SharedIndexInformer, config *tls.Config) *ConfigSync {
+func newConfigSync(configInformer cache.SharedIndexInformer, factory *qdr.ConnectionFactory) *ConfigSync {
 	configSync := &ConfigSync{
 		informer:  configInformer,
-		agentPool: qdr.NewAgentPool("amqps://"+types.LocalTransportServiceName+":5671", config),
+		agentPool: qdr.NewAgentPool(factory),
 	}
 	configSync.events = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "skupper-config-sync")
 	configSync.informer.AddEventHandler(newEventHandlerFor(configSync.events, "", SimpleKey, ConfigMapResourceVersionTest))

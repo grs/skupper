@@ -35,6 +35,22 @@ type SiteMetadata struct {
 	Version string `json:"version,omitempty"`
 }
 
+type RouterNode struct {
+	Id      string `json:"id"`
+	Name    string `json:"name"`
+	NextHop string `json:"nextHop"`
+	Address string `json:"address"`
+}
+
+type Connection struct {
+	Container  string `json:"container"`
+	OperStatus string `json:"operStatus"`
+	Host       string `json:"host"`
+	Role       string `json:"role"`
+	Active     bool   `json:"active"`
+	Dir        string `json:"dir"`
+}
+
 func getSiteMetadata(metadata string) SiteMetadata {
 	result := SiteMetadata{}
 	err := json.Unmarshal([]byte(metadata), &result)
@@ -160,16 +176,14 @@ func (node *RouterNode) asRouter() *Router {
 }
 
 type AgentPool struct {
-	url    string
-	config *tls.Config
-	pool   chan *Agent
+	factory *ConnectionFactory
+	pool    chan *Agent
 }
 
-func NewAgentPool(url string, config *tls.Config) *AgentPool {
+func NewAgentPool(factory *ConnectionFactory) *AgentPool {
 	return &AgentPool{
-		url:    url,
-		config: config,
-		pool:   make(chan *Agent, 10),
+		factory: factory,
+		pool:    make(chan *Agent, 10),
 	}
 }
 
@@ -179,7 +193,7 @@ func (p *AgentPool) Get() (*Agent, error) {
 	select {
 	case a = <-p.pool:
 	default:
-		a, err = Connect(p.url, p.config)
+		a, err = newAgent(p.factory)
 	}
 	return a, err
 }
@@ -194,14 +208,41 @@ func (p *AgentPool) Put(a *Agent) {
 	}
 }
 
-func Connect(url string, config *tls.Config) (*Agent, error) {
-	var connection *amqp.Client
-	var err error
-	if config == nil {
-		connection, err = amqp.Dial(url, amqp.ConnMaxFrameSize(4294967295))
-	} else {
-		connection, err = amqp.Dial(url, amqp.ConnSASLExternal(), amqp.ConnMaxFrameSize(4294967295), amqp.ConnTLSConfig(config))
+type ConnectionFactory struct {
+	url    string
+	config *tls.Config
+}
+
+func (f *ConnectionFactory) Connect() (*amqp.Client, error) {
+	if f.url == "" {
+		return nil, fmt.Errorf("Connection factory has not been configured")
 	}
+	if f.config == nil {
+		return amqp.Dial(f.url, amqp.ConnMaxFrameSize(4294967295))
+	} else {
+		return amqp.Dial(f.url, amqp.ConnSASLExternal(), amqp.ConnMaxFrameSize(4294967295), amqp.ConnTLSConfig(f.config))
+	}
+}
+
+func (f *ConnectionFactory) Configure(url string, config *tls.Config) {
+	f.url = url
+	f.config = config
+}
+
+func (f *ConnectionFactory) Url() string {
+	return f.url
+}
+
+func Connect(url string, config *tls.Config) (*Agent, error) {
+	factory := ConnectionFactory{
+		url:    url,
+		config: config,
+	}
+	return newAgent(&factory)
+}
+
+func newAgent(factory *ConnectionFactory) (*Agent, error) {
+	connection, err := factory.Connect()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create connection: %s", err)
 	}
@@ -511,7 +552,6 @@ func queryAllAgentsForAllTypes(typenames []string, agents []string) []Query {
 }
 
 func (a *Agent) BatchQuery(queries []Query) ([][]Record, error) {
-	fmt.Printf("BatchQuery(%v)\n", queries)
 	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()
 
@@ -543,7 +583,6 @@ func (a *Agent) BatchQuery(queries []Query) ([][]Record, error) {
 	}
 	errors := []string{}
 	for i := 0; i < len(queries); i++ {
-		fmt.Printf("Waiting for response %d of %d\n", (i + 1), len(queries))
 		response, err := a.receiver.Receive(ctx)
 		if err != nil {
 			a.Close()
@@ -591,7 +630,6 @@ func (a *Agent) GetInteriorNodes() ([]RouterNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Interior nodes are %v\n", records)
 	nodes := make([]RouterNode, len(records))
 	for i, r := range records {
 		nodes[i] = asRouterNode(r)

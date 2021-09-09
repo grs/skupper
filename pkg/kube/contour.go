@@ -8,14 +8,14 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-var httpProxyResource = schema.GroupVersionResource{
+var HttpProxyResource = schema.GroupVersionResource{
 	Group:    "projectcontour.io",
 	Version:  "v1",
 	Resource: "httpproxies",
 }
 var httpProxyGVK = schema.GroupVersionKind{
-	Group:   httpProxyResource.Group,
-	Version: httpProxyResource.Version,
+	Group:   HttpProxyResource.Group,
+	Version: HttpProxyResource.Version,
 	Kind:    "HTTPProxy",
 }
 
@@ -70,7 +70,7 @@ func (p *IngressRoute) writeToContourProxy(obj *unstructured.Unstructured) error
 }
 
 func GetContourProxy(client dynamic.Interface, namespace string, name string) (*IngressRoute, error) {
-	obj, err := client.Resource(httpProxyResource).Namespace(namespace).Get(name, metav1.GetOptions{})
+	obj, err := client.Resource(HttpProxyResource).Namespace(namespace).Get(name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		return nil, nil
 	} else if err != nil {
@@ -93,7 +93,7 @@ func CreateContourProxy(client dynamic.Interface, namespace string, name string,
 	if err != nil {
 		return err
 	}
-	_, err = client.Resource(httpProxyResource).Namespace(namespace).Create(&obj, metav1.CreateOptions{})
+	_, err = client.Resource(HttpProxyResource).Namespace(namespace).Create(&obj, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}

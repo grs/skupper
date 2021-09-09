@@ -12,6 +12,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/pkg/kube"
 	"github.com/skupperproject/skupper/pkg/qdr"
+	kubeqdr "github.com/skupperproject/skupper/pkg/kube/qdr"
 )
 
 func (cli *VanClient) getConsoleUrl() (string, error) {
@@ -93,10 +94,10 @@ func (cli *VanClient) RouterInspectNamespace(ctx context.Context, namespace stri
 		}
 		vir.Status.Mode = string(routerConfig.Metadata.Mode)
 		vir.Status.TransportReadyReplicas = current.Status.ReadyReplicas
-		connected, err := qdr.GetConnectedSites(vir.Status.Mode == string(types.TransportModeEdge), namespace, cli.KubeClient, cli.RestConfig)
+		connected, err := kubeqdr.GetConnectedSites(vir.Status.Mode == string(types.TransportModeEdge), namespace, cli.KubeClient, cli.RestConfig)
 		for i := 0; i < 5 && err != nil; i++ {
 			time.Sleep(500 * time.Millisecond)
-			connected, err = qdr.GetConnectedSites(vir.Status.Mode == string(types.TransportModeEdge), namespace, cli.KubeClient, cli.RestConfig)
+			connected, err = kubeqdr.GetConnectedSites(vir.Status.Mode == string(types.TransportModeEdge), namespace, cli.KubeClient, cli.RestConfig)
 		}
 
 		if err == nil {

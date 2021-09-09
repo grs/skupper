@@ -22,6 +22,8 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/event"
+	"github.com/skupperproject/skupper/pkg/kube"
+	newtypes "github.com/skupperproject/skupper/pkg/types"
 )
 
 const (
@@ -181,7 +183,11 @@ func enableClaimVerifier() bool {
 }
 
 func (server *ClaimVerifier) listen() {
+	tlsConfig, err := kube.GetTlsConfigFromSecret("skupper-claims-server", server.vanClient.Namespace, server.vanClient.KubeClient)
+	if err != nil {
+		log.Fatal("Error getting tls config", err.Error())
+	}
 	addr := fmt.Sprintf(":%d", types.ClaimRedemptionPort)
 	log.Printf("Claim verifier listening on %s", addr)
-	log.Fatal(http.ListenAndServeTLS(addr, "/etc/service-controller/certs/tls.crt", "/etc/service-controller/certs/tls.key", server))
+	log.Fatal(newtypes.ListenAndServe(server, addr, tlsConfig))
 }

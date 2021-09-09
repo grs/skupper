@@ -17,6 +17,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/event"
+	"github.com/skupperproject/skupper/pkg/kube"
 )
 
 type ClaimHandler struct {
@@ -32,13 +33,13 @@ func (h *ClaimHandler) Handle(name string, claim *corev1.Secret) error {
 	return nil
 }
 
-func newClaimHandler(cli *client.VanClient, siteId string) *SecretController {
+func newClaimHandler(cli *client.VanClient, siteId string) *kube.SecretController {
 	handler := &ClaimHandler{
 		name:      "ClaimHandler",
 		vanClient: cli,
 		siteId:    siteId,
 	}
-	return NewSecretController(handler.name, types.ClaimRequestSelector, cli.KubeClient, cli.Namespace, handler)
+	return kube.NewSecretController(handler.name, types.ClaimRequestSelector, cli.KubeClient, cli.Namespace, handler)
 }
 
 func (h *ClaimHandler) handleError(claim *corev1.Secret, text string, failed bool) error {

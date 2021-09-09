@@ -234,6 +234,7 @@ func (cli *VanClient) VerifySecretCompatibility(secret corev1.Secret) error {
 	return nil
 }
 
+
 // VerifySiteCompatibility returns nil if current site version is compatible
 // with the provided version, otherwise it returns a clear error.
 func (cli *VanClient) VerifySiteCompatibility(siteVersion string) error {

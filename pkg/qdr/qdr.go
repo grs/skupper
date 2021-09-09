@@ -94,6 +94,10 @@ func (r *RouterConfig) IsEdge() bool {
 	return r.Metadata.Mode == ModeEdge
 }
 
+const (
+	DefaultMountPath string = "/etc/qpid-dispatch-certs"
+)
+
 func (r *RouterConfig) AddSslProfileWithPath(path string, s SslProfile) {
 	if s.CertFile == "" && s.CaCertFile == "" && s.PrivateKeyFile == "" {
 		s.CertFile = fmt.Sprintf(path+"/%s/tls.crt", s.Name)
@@ -104,7 +108,7 @@ func (r *RouterConfig) AddSslProfileWithPath(path string, s SslProfile) {
 }
 
 func (r *RouterConfig) AddSslProfile(s SslProfile) {
-	r.AddSslProfileWithPath("/etc/qpid-dispatch-certs", s)
+	r.AddSslProfileWithPath(DefaultMountPath, s)
 }
 
 func (r *RouterConfig) RemoveSslProfile(name string) bool {
@@ -422,6 +426,17 @@ type HttpEndpoint struct {
 	Aggregation     string `json:"aggregation,omitempty"`
 	EventChannel    bool   `json:"eventChannel,omitempty"`
 	HostOverride    string `json:"hostOverride,omitempty"`
+}
+
+func (endpoint *HttpEndpoint) GetProtocol() string {
+	if endpoint.ProtocolVersion == HttpVersion2 {
+		return "http2"
+	}
+	return "http"
+}
+
+func (endpoint *TcpEndpoint) GetProtocol() string {
+	return "tcp"
 }
 
 func convert(from interface{}, to interface{}) error {
@@ -803,10 +818,8 @@ func (a *BridgeConfigDifference) Print() {
 
 func GetRouterConfigForHeadlessProxy(definition types.ServiceInterface, siteId string, version string, namespace string) (string, error) {
 	config := InitialConfig("$HOSTNAME", siteId, version, true, 3)
-	// add edge-connector
-	config.AddSslProfile(SslProfile{
-		Name: types.InterRouterProfile,
-	})
+	//add edge-connector
+	config.AddSslProfile(SslProfile{Name: types.InterRouterProfile})
 	config.AddConnector(Connector{
 		Name:       "uplink",
 		SslProfile: types.InterRouterProfile,

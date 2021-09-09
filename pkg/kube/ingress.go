@@ -23,9 +23,17 @@ import (
 	networkingv1 "k8s.io/api/networking/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 )
+
+
+var IngressResource = schema.GroupVersionResource{
+	Group:    "networking.k8s.io",
+	Version:  "v1beta1", //TODO: update
+	Resource: "ingresses",
+}
 
 type IngressRoute struct {
 	Name        string

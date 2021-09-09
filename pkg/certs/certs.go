@@ -69,6 +69,52 @@ func decodeDataElement(in []byte, name string) []byte {
 	return block.Bytes
 }
 
+func pemDecode(in []byte) []byte {
+	block, _ := pem.Decode(in)
+	if block == nil {
+		return nil
+	}
+	return block.Bytes
+}
+
+func checkForIP(host string) string {
+	if net.ParseIP(host) != nil {
+		return "[" + host + "]"
+	} else {
+		return host
+	}
+}
+
+func VerifySecret(secret *corev1.Secret, subject string, hosts []string) error {
+	data := pemDecode(secret.Data["tls.crt"])
+	if data == nil {
+		return fmt.Errorf("Failed to decode pem data for tls.crt")
+	}
+	cert, err := x509.ParseCertificate(data)
+	if err != nil {
+		return err
+	}
+	data = pemDecode(secret.Data["tls.key"])
+	if data == nil {
+		return fmt.Errorf("Failed to decode pem data for tls.key")
+	}
+	_, err = x509.ParsePKCS1PrivateKey(data)
+	if err != nil {
+		return err
+	}
+	err = cert.VerifyHostname(checkForIP(subject))
+	if err != nil {
+		return err
+	}
+	for _, host := range hosts {
+		err = cert.VerifyHostname(checkForIP(host))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func getCAFromSecret(secret *corev1.Secret) CertificateAuthority {
 	cert, err := x509.ParseCertificate(decodeDataElement(secret.Data["tls.crt"], "certificate"))
 	if err != nil {

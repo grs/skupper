@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -16,6 +14,7 @@ import (
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/event"
 	"github.com/skupperproject/skupper/pkg/kube"
+	"github.com/skupperproject/skupper/pkg/qdr"
 )
 
 func describe(i interface{}) {
@@ -42,33 +41,7 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 	return stop
 }
 
-func getTlsConfig(verify bool, cert, key, ca string) (*tls.Config, error) {
-	var config tls.Config
-	config.InsecureSkipVerify = true
-	if verify {
-		certPool := x509.NewCertPool()
-		file, err := ioutil.ReadFile(ca)
-		if err != nil {
-			return nil, err
-		}
-		certPool.AppendCertsFromPEM(file)
-		config.RootCAs = certPool
-		config.InsecureSkipVerify = false
-	}
-
-	_, errCert := os.Stat(cert)
-	_, errKey := os.Stat(key)
-	if errCert == nil || errKey == nil {
-		tlsCert, err := tls.LoadX509KeyPair(cert, key)
-		if err != nil {
-			log.Fatal("Could not load x509 key pair", err.Error())
-		}
-		config.Certificates = []tls.Certificate{tlsCert}
-	}
-	config.MinVersion = tls.VersionTLS10
-
-	return &config, nil
-}
+const NamespaceFile string = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 func main() {
 	// if -version used, report and exit
@@ -83,33 +56,64 @@ func main() {
 	log.Printf("Skupper service controller")
 	log.Printf("Version: %s", client.Version)
 
-	origin := os.Getenv("SKUPPER_SITE_ID")
-	namespace := os.Getenv("SKUPPER_NAMESPACE")
-	disableServiceSync := os.Getenv("SKUPPER_DISABLE_SERVICE_SYNC")
-
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := SetupSignalHandler()
 
+	namespace := ""
+	_, err := os.Stat(NamespaceFile)
+	if err == nil {
+		raw, err := ioutil.ReadFile(NamespaceFile)
+		if err != nil {
+			log.Println("Error reading namespace", err.Error())
+		}
+		namespace = string(raw)
+	} else if !os.IsNotExist(err) {
+		log.Println("Error checking for namespace file", err.Error())
+	}
+
+	log.Println("Initialising kubernetes client")
 	// todo, get context from env?
 	cli, err := client.NewClient(namespace, "", "")
 	if err != nil {
 		log.Fatal("Error getting van client", err.Error())
 	}
 
-	tlsConfig, err := getTlsConfig(true, types.ControllerConfigPath+"tls.crt", types.ControllerConfigPath+"tls.key", types.ControllerConfigPath+"ca.crt")
-	if err != nil {
-		log.Fatal("Error getting tls config", err.Error())
-	}
-
 	event.StartDefaultEventStore(stopCh)
 
-	controller, err := NewController(cli, origin, tlsConfig, disableServiceSync == "true")
+	//create initial resources
+	siteMgr := kube.NewSiteManager(cli.Namespace, cli.KubeClient, cli.RouteClient)
+	factory := &qdr.ConnectionFactory{}
+	consoleServer := newConsoleServer(cli, factory, siteMgr)
+	localAddr := "localhost:8181"
+	go func() {
+		err = consoleServer.local.ListenAndServe(localAddr, nil)
+		log.Println(err.Error())
+	}()
+	log.Printf("Local http server listening on %s", localAddr)
+
+	siteMgr.SetConsoleControl(consoleServer.public)
+	err = siteMgr.Start(stopCh)
+	if err != nil {
+		log.Fatal("Error initialising site:", err.Error())
+	}
+	amqpClientCredentials, err := siteMgr.GetAmqpClientCredentials()
+	if err != nil {
+		log.Fatal("Error getting tls config for amqp client", err.Error())
+	}
+	factory.Configure("amqps://"+types.LocalTransportServiceName+":5671", amqpClientCredentials)
+
+	siteConfig := siteMgr.GetSiteConfig()
+	origin := siteMgr.GetSiteId()
+
+	controller, err := NewController(cli, origin, factory, !siteConfig.EnableServiceSync)
 	if err != nil {
 		log.Fatal("Error getting new controller", err.Error())
 	}
 
+	controller.siteQueryServer = newSiteQueryServer(cli, factory)
+
 	log.Println("Waiting for Skupper router component to start")
-	_, err = kube.WaitDeploymentReady(types.TransportDeploymentName, namespace, cli.KubeClient, time.Second*180, time.Second*5)
+	_, err = kube.WaitDeploymentReady(types.TransportDeploymentName, cli.Namespace, cli.KubeClient, time.Second*180, time.Second*5)
 	if err != nil {
 		log.Fatal("Error waiting for transport deployment to be ready: ", err.Error())
 	}

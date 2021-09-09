@@ -100,8 +100,8 @@ func TestQDR(t *testing.T) {
 	assert.Assert(t, router2.Id == router_node.Id && router2.Edge == false, "RouterNode.asRouter failure: Id |%s|  Edge: %t.", router2.Id, router2.Edge)
 
 	// NewAgentPool ------------------------------------
-	agentPool := NewAgentPool("my_url", &tls.Config{})
-	assert.Assert(t, agentPool.url == "my_url", "NewAgentPool failure")
+	agentPool := NewAgentPool(&ConnectionFactory{"my_url", &tls.Config{}})
+	assert.Assert(t, agentPool.factory.url == "my_url", "NewAgentPool failure")
 
 	// Get ------------------------------------
 	agent, err := agentPool.Get()

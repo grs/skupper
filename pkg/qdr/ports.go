@@ -1,11 +1,9 @@
-package main
+package qdr
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/skupperproject/skupper/pkg/qdr"
 )
 
 type PortRange struct {
@@ -22,7 +20,7 @@ const (
 	MAX_PORT = 65535
 )
 
-func newFreePorts() *FreePorts {
+func NewFreePorts() *FreePorts {
 	return &FreePorts{
 		Available: []PortRange{
 			PortRange{
@@ -131,7 +129,7 @@ func (ports *FreePorts) String() string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func (ports *FreePorts) release(port int) bool {
+func (ports *FreePorts) Release(port int) bool {
 	var i int
 	for i = 0; i < len(ports.Available) && port >= (ports.Available[i].Start-1); i++ {
 		if ports.Available[i].contains(port) {
@@ -153,7 +151,7 @@ func (ports *FreePorts) release(port int) bool {
 	return true
 }
 
-func (ports *FreePorts) inuse(port int) bool {
+func (ports *FreePorts) InUse(port int) bool {
 	for i := 0; i < len(ports.Available) && port >= ports.Available[i].Start; i++ {
 		if ports.Available[i].contains(port) {
 			if port == ports.Available[i].Start {
@@ -181,22 +179,22 @@ func (ports *FreePorts) inuse(port int) bool {
 	return false
 }
 
-func (ports *FreePorts) nextFreePort() (int, error) {
+func (ports *FreePorts) NextFreePort() (int, error) {
 	if len(ports.Available) > 0 {
 		next := ports.Available[0].Start
-		ports.inuse(next)
+		ports.InUse(next)
 		return next, nil
 	} else {
 		return 0, fmt.Errorf("No available ports")
 	}
 }
 
-func portAsInt(port string) int {
+func PortAsInt(port string) int {
 	result, _ := strconv.Atoi(port)
 	return result
 }
 
-func (ports *FreePorts) getPortAllocations(bridges *qdr.BridgeConfig) map[string][]int {
+func (ports *FreePorts) GetPortAllocations(bridges *BridgeConfig) map[string][]int {
 	allocations := map[string][]int{}
 	addPort := func(address string, port int) {
 		if curPorts, found := allocations[address]; !found {
@@ -207,24 +205,24 @@ func (ports *FreePorts) getPortAllocations(bridges *qdr.BridgeConfig) map[string
 	}
 	if bridges != nil {
 		for _, b := range bridges.HttpConnectors {
-			port := portAsInt(b.Port)
-			ports.inuse(port)
+			port := PortAsInt(b.Port)
+			ports.InUse(port)
 		}
 		for _, b := range bridges.HttpListeners {
 			address := strings.Split(b.Address, ":")[0]
-			port := portAsInt(b.Port)
+			port := PortAsInt(b.Port)
 			addPort(address, port)
-			ports.inuse(port)
+			ports.InUse(port)
 		}
 		for _, b := range bridges.TcpConnectors {
-			port := portAsInt(b.Port)
-			ports.inuse(port)
+			port := PortAsInt(b.Port)
+			ports.InUse(port)
 		}
 		for _, b := range bridges.TcpListeners {
 			address := strings.Split(b.Address, ":")[0]
-			port := portAsInt(b.Port)
+			port := PortAsInt(b.Port)
 			addPort(address, port)
-			ports.inuse(port)
+			ports.InUse(port)
 		}
 	}
 	return allocations

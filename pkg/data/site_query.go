@@ -1,23 +1,14 @@
-package main
+package data
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/skupperproject/skupper/pkg/utils"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/skupperproject/skupper/api/types"
-	"github.com/skupperproject/skupper/client"
-	"github.com/skupperproject/skupper/pkg/data"
 	"github.com/skupperproject/skupper/pkg/event"
-	"github.com/skupperproject/skupper/pkg/kube"
 	"github.com/skupperproject/skupper/pkg/qdr"
+	"github.com/skupperproject/skupper/pkg/types"
 )
 
 const (
@@ -29,66 +20,61 @@ const (
 	ServiceCheckRequest string = "ServiceCheckRequest"
 )
 
-type SiteQueryServer struct {
-	client    *client.VanClient
-	tlsConfig *tls.Config
-	agentPool *qdr.AgentPool
-	server    *qdr.RequestServer
-	iplookup  *IpLookup
-	siteInfo  data.Site
+type QueryContext interface {
+	LookupSiteInfo(site *Site) error
+	LookupServiceDefinition(address string, svc *ServiceDetail) error
+	LookupIngressPorts(svc *ServiceDetail) error
 }
 
-func newSiteQueryServer(cli *client.VanClient, config *tls.Config) *SiteQueryServer {
+type SiteQueryServer struct {
+	agentPool   *qdr.AgentPool
+	server      *qdr.RequestServer
+	nameMapping NameMapping
+	site        Site
+	context     QueryContext
+}
+
+func NewSiteQueryServer(siteId string, context QueryContext, ipLookup NameMapping, factory *qdr.ConnectionFactory) *SiteQueryServer {
 	sqs := SiteQueryServer{
-		client:    cli,
-		tlsConfig: config,
-		agentPool: qdr.NewAgentPool("amqps://"+types.LocalTransportServiceName+":5671", config),
-		iplookup:  NewIpLookup(cli),
+		agentPool:   qdr.NewAgentPool(factory),
+		nameMapping: ipLookup,
+		context:     context,
 	}
-	sqs.getLocalSiteInfo()
-	sqs.server = qdr.NewRequestServer(getSiteQueryAddress(sqs.siteInfo.SiteId), &sqs, sqs.agentPool)
+	sqs.server = qdr.NewRequestServer(getSiteQueryAddress(siteId), &sqs, sqs.agentPool)
 	return &sqs
 }
 
-func siteQueryError(err error) {
+func (s *SiteQueryServer) getLocalSiteInfo() error {
+	return s.context.LookupSiteInfo(&s.site)
 }
 
-func (s *SiteQueryServer) getLocalSiteInfo() {
-	s.siteInfo.SiteId = os.Getenv("SKUPPER_SITE_ID")
-	s.siteInfo.SiteName = os.Getenv("SKUPPER_SITE_NAME")
-	s.siteInfo.Namespace = os.Getenv("SKUPPER_NAMESPACE")
-	s.siteInfo.Version = client.Version
-	url, err := getSiteUrl(s.client)
+func (s *SiteQueryServer) getLocalSiteQueryData() (*SiteQueryData, error) {
+	err := s.getLocalSiteInfo()
 	if err != nil {
-		event.Recordf(SiteQueryError, "Failed to get site url: %s", err)
-	} else {
-		s.siteInfo.Url = url
+		return nil, fmt.Errorf("Could not lookup site config: %s", err)
 	}
-}
-
-func (s *SiteQueryServer) getLocalSiteQueryData() (data.SiteQueryData, error) {
-	data := data.SiteQueryData{
-		Site: s.siteInfo,
+	data := SiteQueryData{
+		Site: s.site,
 	}
 	agent, err := s.agentPool.Get()
 	if err != nil {
-		return data, fmt.Errorf("Could not get management agent: %s", err)
+		return &data, fmt.Errorf("Could not get management agent: %s", err)
 	}
 	defer s.agentPool.Put(agent)
 
 	routers, err := agent.GetAllRouters()
 	if err != nil {
-		return data, fmt.Errorf("Error retrieving routers: %s", err)
+		return &data, fmt.Errorf("Error retrieving routers: %s", err)
 	}
-	err = getServiceInfo(agent, routers, &data, s.iplookup)
+	err = getServiceInfo(agent, routers, &data, s.nameMapping)
 	if err != nil {
-		return data, fmt.Errorf("Error getting local service info: %s", err)
+		return &data, fmt.Errorf("Error getting local service info: %s", err)
 	}
-	return data, nil
+	return &data, nil
 }
 
-func (s *SiteQueryServer) getGatewayQueryData() ([]data.SiteQueryData, error) {
-	results := []data.SiteQueryData{}
+func (s *SiteQueryServer) getGatewayQueryData() ([]SiteQueryData, error) {
+	results := []SiteQueryData{}
 	agent, err := s.agentPool.Get()
 	if err != nil {
 		return results, fmt.Errorf("Could not get management agent: %s", err)
@@ -100,17 +86,17 @@ func (s *SiteQueryServer) getGatewayQueryData() ([]data.SiteQueryData, error) {
 		return results, fmt.Errorf("Error retrieving gateways: %s", err)
 	}
 	for _, gateway := range gateways {
-		data := data.SiteQueryData{
-			Site: data.Site{
+		data := SiteQueryData{
+			Site: Site{
 				SiteName:  qdr.GetSiteNameForGateway(&gateway),
 				SiteId:    gateway.Site.Id,
 				Version:   gateway.Site.Version,
-				Connected: []string{s.siteInfo.SiteId},
+				Connected: []string{s.site.SiteId},
 				Edge:      true,
 				Gateway:   true,
 			},
 		}
-		err = getServiceInfoForRouters(agent, []qdr.Router{gateway}, &data, s.iplookup)
+		err = getServiceInfoForRouters(agent, []qdr.Router{gateway}, &data, s.nameMapping)
 		if err != nil {
 			return results, fmt.Errorf("Error getting local service info: %s", err)
 		}
@@ -119,42 +105,19 @@ func (s *SiteQueryServer) getGatewayQueryData() ([]data.SiteQueryData, error) {
 	return results, nil
 }
 
-func getSiteUrl(vanClient *client.VanClient) (string, error) {
-	if vanClient.RouteClient == nil {
-		service, err := vanClient.KubeClient.CoreV1().Services(vanClient.Namespace).Get(types.TransportServiceName, metav1.GetOptions{})
-		if err != nil {
-			return "", err
-		} else {
-			if service.Spec.Type == corev1.ServiceTypeLoadBalancer {
-				host := kube.GetLoadBalancerHostOrIp(service)
-				return host, nil
-			} else {
-				return "", nil
-			}
-		}
-	} else {
-		route, err := vanClient.RouteClient.Routes(vanClient.Namespace).Get("skupper-inter-router", metav1.GetOptions{})
-		if err != nil {
-			return "", err
-		} else {
-			return route.Spec.Host, nil
-		}
-	}
-}
-
 func getSiteQueryAddress(siteId string) string {
 	return siteId + "/skupper-site-query"
 }
 
 const (
-	ServiceCheck string = "service-check"
-	GatewayQuery string = "gateway-query"
+	ServiceCheckQueryType string = "service-check"
+	GatewayQueryQueryType string = "gateway-query"
 )
 
 func (s *SiteQueryServer) Request(request *qdr.Request) (*qdr.Response, error) {
-	if request.Type == ServiceCheck {
+	if request.Type == ServiceCheckQueryType {
 		return s.HandleServiceCheck(request)
-	} else if request.Type == GatewayQuery {
+	} else if request.Type == GatewayQueryQueryType {
 		return s.HandleGatewayQuery(request)
 	} else {
 		return s.HandleSiteQuery(request)
@@ -165,13 +128,13 @@ func (s *SiteQueryServer) HandleSiteQuery(request *qdr.Request) (*qdr.Response, 
 	//if request has explicit version, send SiteQueryData, else send LegacySiteData
 	if request.Version == "" {
 		event.Record(SiteQueryRequest, "legacy site data request")
-		data := s.siteInfo.AsLegacySiteInfo()
+		data := s.site.AsLegacySiteInfo()
 		bytes, err := json.Marshal(data)
 		if err != nil {
 			return nil, fmt.Errorf("Could not encode response: %s", err)
 		}
 		return &qdr.Response{
-			Version: client.Version,
+			Version: types.Version,
 			Body:    string(bytes),
 		}, nil
 	} else {
@@ -185,7 +148,7 @@ func (s *SiteQueryServer) HandleSiteQuery(request *qdr.Request) (*qdr.Response, 
 			return nil, fmt.Errorf("Could not encode response: %s", err)
 		}
 		return &qdr.Response{
-			Version: client.Version,
+			Version: types.Version,
 			Body:    string(bytes),
 		}, nil
 	}
@@ -196,7 +159,7 @@ func (s *SiteQueryServer) HandleServiceCheck(request *qdr.Request) (*qdr.Respons
 	data, err := s.getServiceDetail(context.Background(), request.Body)
 	if err != nil {
 		return &qdr.Response{
-			Version: client.Version,
+			Version: types.Version,
 			Type:    ServiceCheckError,
 			Body:    err.Error(),
 		}, nil
@@ -206,7 +169,7 @@ func (s *SiteQueryServer) HandleServiceCheck(request *qdr.Request) (*qdr.Respons
 		return nil, fmt.Errorf("Could not encode service check response: %s", err)
 	}
 	return &qdr.Response{
-		Version: client.Version,
+		Version: types.Version,
 		Type:    request.Type,
 		Body:    string(bytes),
 	}, nil
@@ -223,7 +186,7 @@ func (s *SiteQueryServer) HandleGatewayQuery(request *qdr.Request) (*qdr.Respons
 		return nil, fmt.Errorf("Could not encode response: %s", err)
 	}
 	return &qdr.Response{
-		Version: client.Version,
+		Version: types.Version,
 		Body:    string(bytes),
 	}, nil
 
@@ -237,12 +200,6 @@ func (s *SiteQueryServer) run() {
 			event.Recordf(SiteQueryError, "Error handling requests: %s", err)
 		}
 	}
-}
-
-func (s *SiteQueryServer) start(stopCh <-chan struct{}) error {
-	err := s.iplookup.start(stopCh)
-	go s.run()
-	return err
 }
 
 func getTcpAddressFilter(address string) qdr.TcpEndpointFilter {
@@ -261,34 +218,18 @@ func matchQualifiedAddress(unqualified string, qualified string) bool {
 	return unqualified == strings.Split(qualified, ":")[0]
 }
 
-func (s *SiteQueryServer) getServiceDetail(context context.Context, address string) (data.ServiceDetail, error) {
-	detail := data.ServiceDetail{
-		SiteId: s.siteInfo.SiteId,
+func (s *SiteQueryServer) getServiceDetail(context context.Context, address string) (ServiceDetail, error) {
+	detail := ServiceDetail{
+		SiteId: s.site.SiteId,
 	}
-	definition, err := s.client.ServiceInterfaceInspect(context, address)
+	err := s.context.LookupServiceDefinition(address, &detail)
 	if err != nil {
 		return detail, err
 	}
-	if definition == nil {
-		return detail, fmt.Errorf("No such service %q", address)
-	}
-	detail.Definition = *definition
-
-	service, err := kube.GetService(address, s.client.Namespace, s.client.KubeClient)
+	err = s.context.LookupIngressPorts(&detail)
 	if err != nil {
 		return detail, err
 	}
-
-	detail.IngressBinding.ServicePorts = map[int]int{}
-	for _, ports := range service.Spec.Ports {
-		if utils.IntSliceContains(detail.Definition.Ports, int(ports.Port)) {
-			detail.IngressBinding.ServicePorts[int(ports.Port)] = ports.TargetPort.IntValue()
-		} else {
-			detail.AddObservation(fmt.Sprintf("Kubernetes service defines port %s %d:%d which is not in skupper service definition", ports.Name, ports.Port, ports.TargetPort.IntValue()))
-		}
-	}
-
-	detail.IngressBinding.ServiceSelector = service.Spec.Selector
 
 	agent, err := s.agentPool.Get()
 	if err != nil {
@@ -296,37 +237,7 @@ func (s *SiteQueryServer) getServiceDetail(context context.Context, address stri
 	}
 	defer s.agentPool.Put(agent)
 
-	if detail.Definition.Protocol == "tcp" {
-		listeners, err := agent.GetLocalTcpListeners(getTcpAddressFilter(detail.Definition.Address))
-		if err != nil {
-			detail.AddObservation(fmt.Sprintf("Error retrieving tcp listeners: %s", err))
-		} else {
-			detail.ExtractTcpListenerPorts(listeners)
-		}
-
-		connectors, err := agent.GetLocalTcpConnectors(getTcpAddressFilter(detail.Definition.Address))
-		if err != nil {
-			detail.AddObservation(fmt.Sprintf("Error retrieving tcp connectors for %s: %s", detail.Definition.Address, err))
-		} else {
-			detail.ExtractTcpConnectorPorts(connectors)
-		}
-	} else if detail.Definition.Protocol == "http" || detail.Definition.Protocol == "http2" {
-		listeners, err := agent.GetLocalHttpListeners(getHttpAddressFilter(detail.Definition.Address))
-		if err != nil {
-			detail.AddObservation(fmt.Sprintf("Error retrieving http listeners: %s", err))
-		} else {
-			detail.ExtractHttpListenerPorts(listeners)
-		}
-
-		connectors, err := agent.GetLocalHttpConnectors(getHttpAddressFilter(detail.Definition.Address))
-		if err != nil {
-			detail.AddObservation(fmt.Sprintf("Error retrieving http connectors for %s: %s", detail.Definition.Address, err))
-		} else {
-			detail.ExtractHttpConnectorPorts(connectors)
-		}
-	} else {
-		detail.AddObservation(fmt.Sprintf("Unrecognised protocol: %s", detail.Definition.Protocol))
-	}
+	detail.LookupRouterBindings(agent)
 
 	if len(detail.Definition.Targets) > 0 && len(detail.EgressBindings) == 0 {
 		detail.AddObservation(fmt.Sprintf("No connectors on %s for %s ", detail.SiteId, detail.Definition.Address))
@@ -334,18 +245,18 @@ func (s *SiteQueryServer) getServiceDetail(context context.Context, address stri
 	return detail, nil
 }
 
-func querySites(agent qdr.RequestResponse, sites []data.SiteQueryData) {
+func querySites(agent qdr.RequestResponse, sites []SiteQueryData) {
 	for i, s := range sites {
 		request := qdr.Request{
 			Address: getSiteQueryAddress(s.SiteId),
-			Version: client.Version,
+			Version: types.Version,
 		}
 		response, err := agent.Request(&request)
 		if err != nil {
 			event.Recordf(SiteQueryError, "Request to %s failed: %s", s.SiteId, err)
 		} else if response.Version == "" {
 			//assume legacy version of site-query protocol
-			info := data.LegacySiteInfo{}
+			info := LegacySiteInfo{}
 			err := json.Unmarshal([]byte(response.Body), &info)
 			if err != nil {
 				event.Recordf(SiteQueryError, "Error parsing legacy json %q from %s: %s", response.Body, s.SiteId, err)
@@ -356,7 +267,7 @@ func querySites(agent qdr.RequestResponse, sites []data.SiteQueryData) {
 				sites[i].Version = info.Version
 			}
 		} else {
-			site := data.SiteQueryData{}
+			site := SiteQueryData{}
 			err := json.Unmarshal([]byte(response.Body), &site)
 			if err != nil {
 				event.Recordf(SiteQueryError, "Error parsing json for site query %q from %s: %s", response.Body, s.SiteId, err)
@@ -372,19 +283,19 @@ func querySites(agent qdr.RequestResponse, sites []data.SiteQueryData) {
 	}
 }
 
-func queryGateways(agent qdr.RequestResponse, sites []data.SiteQueryData) []data.SiteQueryData {
-	gateways := []data.SiteQueryData{}
+func queryGateways(agent qdr.RequestResponse, sites []SiteQueryData) []SiteQueryData {
+	gateways := []SiteQueryData{}
 	for _, s := range sites {
 		request := qdr.Request{
 			Address: getSiteQueryAddress(s.SiteId),
-			Version: client.Version,
-			Type:    GatewayQuery,
+			Version: types.Version,
+			Type:    GatewayQueryQueryType,
 		}
 		response, err := agent.Request(&request)
 		if err != nil {
 			event.Recordf(GatewayQueryError, "Request to %s failed: %s", s.SiteId, err)
 		} else {
-			sites := []data.SiteQueryData{}
+			sites := []SiteQueryData{}
 			err := json.Unmarshal([]byte(response.Body), &sites)
 			if err != nil {
 				event.Recordf(SiteQueryError, "Error parsing json for site query %q from %s: %s", response.Body, s.SiteId, err)
@@ -395,11 +306,11 @@ func queryGateways(agent qdr.RequestResponse, sites []data.SiteQueryData) []data
 	return gateways
 }
 
-func getServiceInfo(agent *qdr.Agent, network []qdr.Router, site *data.SiteQueryData, lookup data.NameMapping) error {
+func getServiceInfo(agent *qdr.Agent, network []qdr.Router, site *SiteQueryData, lookup NameMapping) error {
 	return getServiceInfoForRouters(agent, qdr.GetRoutersForSite(network, site.SiteId), site, lookup)
 }
 
-func getServiceInfoForRouters(agent *qdr.Agent, routers []qdr.Router, site *data.SiteQueryData, lookup data.NameMapping) error {
+func getServiceInfoForRouters(agent *qdr.Agent, routers []qdr.Router, site *SiteQueryData, lookup NameMapping) error {
 	bridges, err := agent.GetBridges(routers)
 	if err != nil {
 		return fmt.Errorf("Error retrieving bridge configuration: %s", err)
@@ -412,18 +323,18 @@ func getServiceInfoForRouters(agent *qdr.Agent, routers []qdr.Router, site *data
 	if err != nil {
 		return fmt.Errorf("Error retrieving tcp connection info: %s", err)
 	}
-	site.HttpServices = data.GetHttpServices(site.SiteId, httpRequestInfo, qdr.GetHttpConnectors(bridges), qdr.GetHttpListeners(bridges), lookup)
-	site.TcpServices = data.GetTcpServices(site.SiteId, tcpConnections, qdr.GetTcpConnectors(bridges), lookup)
+	site.HttpServices = GetHttpServices(site.SiteId, httpRequestInfo, qdr.GetHttpConnectors(bridges), qdr.GetHttpListeners(bridges), lookup)
+	site.TcpServices = GetTcpServices(site.SiteId, tcpConnections, qdr.GetTcpConnectors(bridges), lookup)
 	return nil
 }
 
-func checkServiceForSites(agent qdr.RequestResponse, address string, sites *data.ServiceCheck) error {
-	details := []data.ServiceDetail{}
+func checkServiceForSites(agent qdr.RequestResponse, address string, sites *ServiceCheck) error {
+	details := []ServiceDetail{}
 	for _, s := range sites.Details {
 		request := qdr.Request{
 			Address: getSiteQueryAddress(s.SiteId),
-			Version: client.Version,
-			Type:    ServiceCheck,
+			Version: types.Version,
+			Type:    ServiceCheckQueryType,
 			Body:    address,
 		}
 		response, err := agent.Request(&request)
@@ -434,7 +345,7 @@ func checkServiceForSites(agent qdr.RequestResponse, address string, sites *data
 		if response.Type == ServiceCheckError {
 			sites.AddObservation(fmt.Sprintf("%s on %s", response.Body, s.SiteId))
 		} else {
-			detail := data.ServiceDetail{}
+			detail := ServiceDetail{}
 			err = json.Unmarshal([]byte(response.Body), &detail)
 			if err != nil {
 				event.Recordf(ServiceCheckError, "Error parsing json for service check %q from %s: %s", response.Body, s.SiteId, err)
@@ -444,6 +355,6 @@ func checkServiceForSites(agent qdr.RequestResponse, address string, sites *data
 		}
 	}
 	sites.Details = details
-	data.CheckService(sites)
+	CheckService(sites)
 	return nil
 }

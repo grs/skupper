@@ -31,13 +31,13 @@ func (h *TokenHandler) Handle(name string, token *corev1.Secret) error {
 	}
 }
 
-func newTokenHandler(cli *client.VanClient, siteId string) *SecretController {
+func newTokenHandler(cli *client.VanClient, siteId string) *kube.SecretController {
 	handler := &TokenHandler{
 		name:      "TokenHandler",
 		vanClient: cli,
 		siteId:    siteId,
 	}
-	return NewSecretController(handler.name, types.TypeTokenQualifier, cli.KubeClient, cli.Namespace, handler)
+	return kube.NewSecretController(handler.name, types.TypeTokenQualifier, cli.KubeClient, cli.Namespace, handler)
 }
 
 func (c *TokenHandler) getTokenCost(token *corev1.Secret) (int32, bool) {

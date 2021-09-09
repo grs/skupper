@@ -1,7 +1,8 @@
-package main
+package kube
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,18 +17,16 @@ import (
 	"github.com/skupperproject/skupper/pkg/event"
 )
 
-type SecretHandler interface {
-	Handle(name string, secret *corev1.Secret) error
-}
+type ConfigMapHandler func(string, *corev1.ConfigMap) error
 
-type SecretController struct {
+type ConfigMapController struct {
 	name     string
-	handler  SecretHandler
+	handler  ConfigMapHandler
 	informer cache.SharedIndexInformer
 	queue    workqueue.RateLimitingInterface
 }
 
-func (c *SecretController) enqueue(obj interface{}) {
+func (c *ConfigMapController) enqueue(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err == nil {
 		c.queue.Add(key)
@@ -36,23 +35,19 @@ func (c *SecretController) enqueue(obj interface{}) {
 	}
 }
 
-func (c *SecretController) OnAdd(obj interface{}) {
+func (c *ConfigMapController) OnAdd(obj interface{}) {
 	c.enqueue(obj)
 }
 
-func (c *SecretController) OnUpdate(a, b interface{}) {
-	aa := a.(*corev1.Secret)
-	bb := b.(*corev1.Secret)
-	if aa.ResourceVersion != bb.ResourceVersion {
-		c.enqueue(b)
-	}
+func (c *ConfigMapController) OnUpdate(a, b interface{}) {
+	c.enqueue(b)
 }
 
-func (c *SecretController) OnDelete(obj interface{}) {
+func (c *ConfigMapController) OnDelete(obj interface{}) {
 	c.enqueue(obj)
 }
 
-func (c *SecretController) start(stopCh <-chan struct{}) error {
+func (c *ConfigMapController) start(stopCh <-chan struct{}) error {
 	go c.informer.Run(stopCh)
 	if ok := cache.WaitForCacheSync(stopCh, c.informer.HasSynced); !ok {
 		return fmt.Errorf("Failed to wait for caches to sync")
@@ -61,19 +56,24 @@ func (c *SecretController) start(stopCh <-chan struct{}) error {
 	return nil
 }
 
-func (c *SecretController) stop() {
+func (c *ConfigMapController) stop() {
 	c.queue.ShutDown()
 }
 
-func (c *SecretController) run() {
+func (c *ConfigMapController) run() {
 	for c.process() {
 	}
+	log.Println("STOPPED PROCESSING!")
 }
 
-func (c *SecretController) process() bool {
+func (c *ConfigMapController) process() bool {
+	log.Println("WAITING FOR SITE CONFIG CHANGE")
 	obj, shutdown := c.queue.Get()
+	log.Println("GOT SITE CONFIG CHANGE")
 
 	if shutdown {
+		event.Record(c.name, "Shutdown")
+		log.Println("SHUTDOWN")
 		return false
 	}
 
@@ -82,20 +82,22 @@ func (c *SecretController) process() bool {
 	if key, ok := obj.(string); ok {
 		entity, exists, err := c.informer.GetStore().GetByKey(key)
 		if err != nil {
-			event.Recordf(c.name, "Error retrieving secret %q: %s", key, err)
+			event.Recordf(c.name, "Error retrieving configmap %q: %s", key, err)
 		}
 		if exists {
-			if secret, ok := entity.(*corev1.Secret); ok {
-				err := c.handler.Handle(key, secret)
+			if configmap, ok := entity.(*corev1.ConfigMap); ok {
+				event.Recordf(c.name, "%q updated", key)
+				err := c.handler(key, configmap)
 				if err != nil {
 					retry = true
 					event.Recordf(c.name, "Error handling %q: %s", key, err)
 				}
 			} else {
-				event.Recordf(c.name, "Expected secret, got %#v", entity)
+				event.Recordf(c.name, "Expected configmap, got %#v", entity)
 			}
 		} else {
-			err := c.handler.Handle(key, nil)
+			err := c.handler(key, nil)
+			event.Recordf(c.name, "%q deleted", key)
 			if err != nil {
 				retry = true
 				event.Recordf(c.name, "Error handling %q: %s", key, err)
@@ -106,24 +108,25 @@ func (c *SecretController) process() bool {
 	}
 	c.queue.Forget(obj)
 
-	if retry && c.queue.NumRequeues(obj) < 5 {
+	if retry {
 		c.queue.AddRateLimited(obj)
 	}
+	log.Println("SITE CONFIG CHANGE HANDLED")
 	return true
 }
 
-func NewSecretController(name string, selector string, client kubernetes.Interface, namespace string, handler SecretHandler) *SecretController {
-	informer := corev1informer.NewFilteredSecretInformer(
+func NewConfigMapController(name string, configmap string, client kubernetes.Interface, namespace string, handler ConfigMapHandler) *ConfigMapController {
+	informer := corev1informer.NewFilteredConfigMapInformer(
 		client,
 		namespace,
 		time.Second*30,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 		internalinterfaces.TweakListOptionsFunc(func(options *metav1.ListOptions) {
-			options.LabelSelector = selector
+			options.FieldSelector = "metadata.name=" + configmap
 		}))
 	queue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name)
 
-	controller := &SecretController{
+	controller := &ConfigMapController{
 		name:     name,
 		handler:  handler,
 		informer: informer,

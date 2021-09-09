@@ -4,7 +4,7 @@ SITE_CONTROLLER_IMAGE := quay.io/skupper/site-controller
 TEST_IMAGE := quay.io/skupper/skupper-tests
 TEST_BINARIES_FOLDER := ${PWD}/test/integration/bin
 DOCKER := docker
-LDFLAGS := -X github.com/skupperproject/skupper/client.Version=${VERSION}
+LDFLAGS := -X github.com/skupperproject/skupper/client.Version=${VERSION} -X github.com/skupperproject/skupper/pkg/types.Version=${VERSION}
 
 all: build-cmd build-get build-controllers build-tests
 
@@ -23,7 +23,7 @@ build-get:
 	go build -ldflags="${LDFLAGS}"  -o get ./cmd/get
 
 build-service-controller:
-	go build -ldflags="${LDFLAGS}"  -o service-controller cmd/service-controller/main.go cmd/service-controller/controller.go cmd/service-controller/service_sync.go cmd/service-controller/bridges.go cmd/service-controller/ports.go cmd/service-controller/definition_monitor.go cmd/service-controller/console_server.go cmd/service-controller/site_query.go cmd/service-controller/ip_lookup.go cmd/service-controller/config_sync.go cmd/service-controller/claim_verifier.go cmd/service-controller/token_handler.go cmd/service-controller/secret_controller.go cmd/service-controller/claim_handler.go cmd/service-controller/tokens.go cmd/service-controller/links.go cmd/service-controller/services.go
+	go build -ldflags="${LDFLAGS}"  -o service-controller cmd/service-controller/main.go cmd/service-controller/definition_monitor.go cmd/service-controller/config_sync.go cmd/service-controller/claim_verifier.go cmd/service-controller/token_handler.go cmd/service-controller/claim_handler.go
 
 build-site-controller:
 	go build -ldflags="${LDFLAGS}"  -o site-controller cmd/site-controller/main.go cmd/site-controller/controller.go

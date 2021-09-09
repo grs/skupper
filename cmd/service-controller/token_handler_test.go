@@ -80,7 +80,11 @@ func TestTokenHandler(t *testing.T) {
 		KubeClient: fake.NewSimpleClientset(),
 	}
 
-	handler := newTokenHandler(cli, "site-a")
+	handler := &TokenHandler{
+		name:      "TokenHandler",
+		vanClient: cli,
+		siteId:    "site-a",
+	}
 
 	name := "foo"
 	err := skupperInit(cli, name)
@@ -162,7 +166,7 @@ func TestTokenHandler(t *testing.T) {
 		_, err = cli.KubeClient.CoreV1().Secrets(cli.Namespace).Create(token)
 		assert.Check(t, err, name)
 
-		err = handler.handler.Handle(test.name, token)
+		err = handler.Handle(test.name, token)
 		assert.Check(t, err, test.name)
 		config, err := getRouterConfig(cli)
 		assert.Check(t, err, test.name)
@@ -187,7 +191,7 @@ func TestTokenHandler(t *testing.T) {
 			assert.Check(t, err, test.name)
 			assert.Assert(t, checkVolumeMount(&deployment.Spec.Template.Spec, test.name), test.name)
 			//now disconnect:
-			err = handler.handler.Handle(test.name, nil)
+			err = handler.Handle(test.name, nil)
 			assert.Check(t, err, test.name)
 			config, err = getRouterConfig(cli)
 			assert.Check(t, err, test.name)
