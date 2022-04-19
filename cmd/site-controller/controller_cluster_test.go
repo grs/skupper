@@ -103,7 +103,7 @@ func waitForWorkqueueEmpty(c *SiteController) error {
 	defer cancel()
 
 	err = utils.RetryWithContext(ctx, time.Second*5, func() (bool, error) {
-		return c.workqueue.Len() == 0, nil
+		return c.controller.Empty(), nil
 	})
 
 	return err
@@ -130,8 +130,12 @@ const (
 	Update
 	Delete
 )
+const (
+	Token      string = "token"
+	SiteConfig string = "site-config"
+)
 
-func watchForEvent(cli *client.VanClient, namespace string, name string, event eventType, trigger triggerType, label string, contCh chan<- struct{}) error {
+func watchForEvent(cli *client.VanClient, namespace string, name string, event eventType, trigger string, label string, contCh chan<- struct{}) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -6,27 +6,35 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
-	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/informers/internalinterfaces"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
+	"github.com/skupperproject/skupper/pkg/event"
+	"github.com/skupperproject/skupper/pkg/kube"
 )
 
 type SiteController struct {
 	vanClient            *client.VanClient
-	siteInformer         cache.SharedIndexInformer
-	tokenRequestInformer cache.SharedIndexInformer
-	workqueue            workqueue.RateLimitingInterface
+	controller           *kube.Controller
+	stopCh               <-chan struct{}
+	siteWatcher          *kube.ConfigMapWatcher
+	tokenRequestWatcher  *kube.SecretWatcher
+	pullSecrets          *kube.SecretWatcher
+	pushSecrets          *kube.SecretWatcher
+	networkManagers      map[string]*kube.NetworkManager
+}
+
+func siteWatcherOptions() internalinterfaces.TweakListOptionsFunc {
+	return func(options *metav1.ListOptions) {
+		options.FieldSelector = "metadata.name=skupper-site"
+		options.LabelSelector = "!" + types.SiteControllerIgnore
+	}
 }
 
 func NewSiteController(cli *client.VanClient) (*SiteController, error) {
@@ -42,157 +50,39 @@ func NewSiteController(cli *client.VanClient) (*SiteController, error) {
 	}
 	log.Printf("Version: %s", client.Version)
 
-	siteInformer := corev1informer.NewFilteredConfigMapInformer(
-		cli.KubeClient,
-		watchNamespace,
-		time.Second*30,
-		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-		internalinterfaces.TweakListOptionsFunc(func(options *metav1.ListOptions) {
-			options.FieldSelector = "metadata.name=skupper-site"
-			options.LabelSelector = "!" + types.SiteControllerIgnore
-		}))
-	tokenRequestInformer := corev1informer.NewFilteredSecretInformer(
-		cli.KubeClient,
-		watchNamespace,
-		time.Second*30,
-		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-		internalinterfaces.TweakListOptionsFunc(func(options *metav1.ListOptions) {
-			options.LabelSelector = types.TypeTokenRequestQualifier
-		}))
-	workqueue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "skupper-site-controller")
-
 	controller := &SiteController{
 		vanClient:            cli,
-		siteInformer:         siteInformer,
-		tokenRequestInformer: tokenRequestInformer,
-		workqueue:            workqueue,
+		controller:           kube.NewController("SiteController", cli.KubeClient),
 	}
+	controller.siteWatcher = controller.controller.WatchConfigMaps(siteWatcherOptions(), watchNamespace, controller.checkSite)
+	controller.tokenRequestWatcher = controller.controller.WatchSecrets(kube.ListByLabelSelector(types.TypeTokenRequestQualifier), watchNamespace, controller.checkTokenRequest)
+	controller.pullSecrets = controller.controller.WatchSecrets(kube.ListByLabelSelector("skupper.io/type=pull-secret"), watchNamespace, controller.pullSecretsChanged)
+	controller.pushSecrets = controller.controller.WatchSecrets(kube.ListByLabelSelector("skupper.io/type=push-secret"), watchNamespace, controller.pushSecretsChanged)
+	controller.networkManagers = map[string]*kube.NetworkManager{}
 
-	siteInformer.AddEventHandler(controller.getHandlerFuncs(SiteConfig, configmapResourceVersionTest))
-	tokenRequestInformer.AddEventHandler(controller.getHandlerFuncs(TokenRequest, secretResourceVersionTest))
 	return controller, nil
 }
 
-type resourceVersionTest func(a interface{}, b interface{}) bool
-
-func configmapResourceVersionTest(a interface{}, b interface{}) bool {
-	aa := a.(*corev1.ConfigMap)
-	bb := b.(*corev1.ConfigMap)
-	return aa.ResourceVersion == bb.ResourceVersion
-}
-
-func secretResourceVersionTest(a interface{}, b interface{}) bool {
-	aa := a.(*corev1.Secret)
-	bb := b.(*corev1.Secret)
-	return aa.ResourceVersion == bb.ResourceVersion
-}
-
-func (c *SiteController) getHandlerFuncs(category triggerType, test resourceVersionTest) *cache.ResourceEventHandlerFuncs {
-	return &cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			c.enqueueTrigger(obj, category)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			if !test(old, new) {
-				c.enqueueTrigger(new, category)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			c.enqueueTrigger(obj, category)
-		},
-	}
-}
-
 func (c *SiteController) Run(stopCh <-chan struct{}) error {
-	defer utilruntime.HandleCrash()
-	defer c.workqueue.ShutDown()
-
 	log.Println("Starting the Skupper site controller informers")
-	go c.siteInformer.Run(stopCh)
-	go c.tokenRequestInformer.Run(stopCh)
+	event.StartDefaultEventStore(stopCh)
+	c.siteWatcher.Start(stopCh)
+	c.tokenRequestWatcher.Start(stopCh)
+	c.pullSecrets.Start(stopCh)
+	c.pushSecrets.Start(stopCh)
+	c.stopCh = stopCh
 
 	log.Println("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.siteInformer.HasSynced); !ok {
+	if ok := c.siteWatcher.Sync(stopCh); !ok {
 		return fmt.Errorf("Failed to wait for caches to sync")
 	}
 	log.Printf("Checking if sites need updates (%s)", client.Version)
 	c.updateChecks()
-	log.Println("Starting workers")
-	go wait.Until(c.run, time.Second, stopCh)
-	log.Println("Started workers")
-
+	log.Println("Starting event loop")
+	c.controller.Start(stopCh)
 	<-stopCh
-	log.Println("Shutting down workers")
+	log.Println("Shutting down")
 	return nil
-}
-
-type triggerType int
-
-const (
-	SiteConfig triggerType = iota
-	Token
-	TokenRequest
-)
-
-type trigger struct {
-	key      string
-	category triggerType
-}
-
-func (c *SiteController) run() {
-	for c.processNextTrigger() {
-	}
-}
-
-func (c *SiteController) processNextTrigger() bool {
-	obj, shutdown := c.workqueue.Get()
-
-	if shutdown {
-		return false
-	}
-
-	defer c.workqueue.Done(obj)
-	var t trigger
-	var ok bool
-	if t, ok = obj.(trigger); !ok {
-		// invalid item
-		c.workqueue.Forget(obj)
-		utilruntime.HandleError(fmt.Errorf("Invalid item on work queue %#v", obj))
-		return true
-	}
-
-	err := c.dispatchTrigger(t)
-	c.workqueue.Forget(obj)
-	if err != nil {
-		utilruntime.HandleError(err)
-	}
-
-	return true
-}
-
-func (c *SiteController) dispatchTrigger(trigger trigger) error {
-	switch trigger.category {
-	case SiteConfig:
-		return c.checkSite(trigger.key)
-	case TokenRequest:
-		return c.checkTokenRequest(trigger.key)
-	default:
-		return fmt.Errorf("invalid trigger %d", trigger.category)
-	}
-
-}
-
-func (c *SiteController) enqueueTrigger(obj interface{}, category triggerType) {
-	var key string
-	var err error
-	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
-		utilruntime.HandleError(err)
-		return
-	}
-	c.workqueue.Add(trigger{
-		key:      key,
-		category: category,
-	})
 }
 
 func (c *SiteController) checkAllForSite() {
@@ -202,21 +92,14 @@ func (c *SiteController) checkAllForSite() {
 	log.Println("Done.")
 }
 
-func (c *SiteController) checkSite(key string) error {
-	// get site namespace
-	siteNamespace, _, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		log.Println("Error checking skupper-site namespace: ", err)
-		return err
-	}
-	//get skupper-site configmap
-	obj, exists, err := c.siteInformer.GetStore().GetByKey(key)
-	if err != nil {
-		log.Println("Error checking skupper-site config map: ", err)
-		return err
-	} else if exists {
-		configmap := obj.(*corev1.ConfigMap)
-		_, err := c.vanClient.RouterInspectNamespace(context.Background(), configmap.ObjectMeta.Namespace)
+func (c *SiteController) checkSite(key string, configmap *corev1.ConfigMap) error {
+	if configmap != nil {
+		siteNamespace, _, err := cache.SplitMetaNamespaceKey(key)
+		if err != nil {
+			log.Println("Error checking skupper-site namespace: ", err)
+			return err
+		}
+		_, err = c.vanClient.RouterInspectNamespace(context.Background(), configmap.ObjectMeta.Namespace)
 		if err == nil {
 			log.Println("Skupper site exists", key)
 			updatedLogging, err := c.vanClient.RouterUpdateLogging(context.Background(), configmap, false)
@@ -331,21 +214,17 @@ func (c *SiteController) generate(token *corev1.Secret) error {
 
 func (c *SiteController) checkAllTokenRequests() {
 	//can we rely on the cache here?
-	tokens := c.tokenRequestInformer.GetStore().List()
+	tokens := c.tokenRequestWatcher.List()
 	for _, t := range tokens {
 		// service from workqueue
-		c.enqueueTrigger(t, TokenRequest)
+		c.controller.AddEvent(t)
 	}
 }
 
-func (c *SiteController) checkTokenRequest(key string) error {
+
+func (c *SiteController) checkTokenRequest(key string, token *corev1.Secret) error {
 	log.Printf("Handling token request for %s", key)
-	obj, exists, err := c.tokenRequestInformer.GetStore().GetByKey(key)
-	if err != nil {
-		log.Println("Error checking connection-token-request secret: ", err)
-		return err
-	} else if exists {
-		token := obj.(*corev1.Secret)
+	if token != nil {
 		if !c.isTokenRequestValidInSite(token) {
 			log.Println("Cannot handle token request, as site not yet initialised")
 			return nil
@@ -387,19 +266,48 @@ func (c *SiteController) isTokenRequestValidInSite(token *corev1.Secret) bool {
 }
 
 func (c *SiteController) updateChecks() {
-	sites := c.siteInformer.GetStore().List()
-	for _, s := range sites {
-		if site, ok := s.(*corev1.ConfigMap); ok {
-			updated, err := c.vanClient.RouterUpdateVersionInNamespace(context.Background(), false, site.ObjectMeta.Namespace)
-			if err != nil {
-				log.Printf("Version update check failed for namespace %q: %s", site.ObjectMeta.Namespace, err)
-			} else if updated {
-				log.Printf("Updated version for namespace %q", site.ObjectMeta.Namespace)
-			} else {
-				log.Printf("Version update not required for namespace %q", site.ObjectMeta.Namespace)
-			}
+	sites := c.siteWatcher.List()
+	for _, site := range sites {
+		updated, err := c.vanClient.RouterUpdateVersionInNamespace(context.Background(), false, site.ObjectMeta.Namespace)
+		if err != nil {
+			log.Printf("Version update check failed for namespace %q: %s", site.ObjectMeta.Namespace, err)
+		} else if updated {
+			log.Printf("Updated version for namespace %q", site.ObjectMeta.Namespace)
 		} else {
-			log.Printf("Unexpected item in site informer store: %v", s)
+			log.Printf("Version update not required for namespace %q", site.ObjectMeta.Namespace)
 		}
 	}
+}
+
+func (c *SiteController) generateToken(name string, namespace string) (*corev1.Secret, error) {
+	token, _, err := c.vanClient.ConnectorTokenCreate(context.Background(), name, namespace)
+	return token, err
+}
+
+func (c *SiteController) pullSecretsChanged(key string, token *corev1.Secret) error {
+	log.Printf("PullSecret event for %s", key)
+	if mgr, ok := c.networkManagers[key]; ok {
+		if !mgr.HasChanged(token) {
+			return nil
+		}
+		mgr.Stop()
+	}
+	mgr, err := kube.NewNetworkManager(c.generateToken, c.vanClient.KubeClient, c.controller, c.stopCh, token)
+	if err != nil {
+		return err
+	}
+	c.networkManagers[key] = mgr
+	return nil
+}
+
+func (c *SiteController) pushSecretsChanged(key string, token *corev1.Secret) error {
+	log.Printf("PushSecret event for %s", key)
+	if token != nil {
+		//create syncer for the site
+		//
+		// get kubernetes client interface from context held in secret
+	} else {
+		//delete syncer for that site
+	}
+	return nil
 }
