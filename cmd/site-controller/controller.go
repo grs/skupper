@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +29,7 @@ type SiteController struct {
 	tokenRequestWatcher  *kube.SecretWatcher
 	pullSecrets          *kube.SecretWatcher
 	pushSecrets          *kube.SecretWatcher
+	kcpSyncConfig        *kube.SecretWatcher
 	networkManagers      map[string]*kube.NetworkManager
 }
 
@@ -36,6 +39,13 @@ func siteWatcherOptions() internalinterfaces.TweakListOptionsFunc {
 		options.LabelSelector = "!" + types.SiteControllerIgnore
 	}
 }
+
+const (
+	KcpSyncerConfigName     string = "kcp-syncer-config"
+	KcpSyncerDeploymentName string = "kcp-syncer"
+	KcpSyncerContainerName  string = "kcp-syncer"
+	WorkloadClusterArgName  string = "--workload-cluster-name="
+)
 
 func NewSiteController(cli *client.VanClient) (*SiteController, error) {
 	var watchNamespace string
@@ -57,6 +67,7 @@ func NewSiteController(cli *client.VanClient) (*SiteController, error) {
 	controller.siteWatcher = controller.controller.WatchConfigMaps(siteWatcherOptions(), watchNamespace, controller.checkSite)
 	controller.tokenRequestWatcher = controller.controller.WatchSecrets(kube.ListByLabelSelector(types.TypeTokenRequestQualifier), watchNamespace, controller.checkTokenRequest)
 	controller.pullSecrets = controller.controller.WatchSecrets(kube.ListByLabelSelector("skupper.io/type=pull-secret"), watchNamespace, controller.pullSecretsChanged)
+	controller.kcpSyncConfig = controller.controller.WatchSecrets(kube.ListByName(KcpSyncerConfigName), watchNamespace, controller.pullSecretsChanged)
 	controller.pushSecrets = controller.controller.WatchSecrets(kube.ListByLabelSelector("skupper.io/type=push-secret"), watchNamespace, controller.pushSecretsChanged)
 	controller.networkManagers = map[string]*kube.NetworkManager{}
 
@@ -69,6 +80,7 @@ func (c *SiteController) Run(stopCh <-chan struct{}) error {
 	c.siteWatcher.Start(stopCh)
 	c.tokenRequestWatcher.Start(stopCh)
 	c.pullSecrets.Start(stopCh)
+	c.kcpSyncConfig.Start(stopCh)
 	c.pushSecrets.Start(stopCh)
 	c.stopCh = stopCh
 
@@ -284,15 +296,52 @@ func (c *SiteController) generateToken(name string, namespace string) (*corev1.S
 	return token, err
 }
 
+func getClusterId(deployment *appsv1.Deployment) (string, error) {
+	container := kube.GetContainerByName(deployment.Spec.Template.Spec.Containers, KcpSyncerContainerName)
+	if container == nil {
+		return "", fmt.Errorf("Cannot determine cluster id for deployment %s, container %q not found", KcpSyncerDeploymentName, KcpSyncerContainerName)
+	}
+	for _, a := range container.Args {
+		if strings.HasPrefix(a, WorkloadClusterArgName) {
+			return strings.TrimPrefix(a, WorkloadClusterArgName), nil
+		}
+	}
+	return "", fmt.Errorf("Cannot determine cluster id for deployment %s, argument %q not found", KcpSyncerDeploymentName, WorkloadClusterArgName)
+}
+
 func (c *SiteController) pullSecretsChanged(key string, token *corev1.Secret) error {
-	log.Printf("PullSecret event for %s", key)
+	var namespace string
+	var cluster string
+
+	if token.ObjectMeta.Name == KcpSyncerConfigName {
+		log.Printf("KCP syncer config event for %s", key)
+		//lookup cluster id from deployment args
+		dep, err := c.vanClient.KubeClient.AppsV1().Deployments(token.ObjectMeta.Namespace).Get(KcpSyncerDeploymentName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("Cannot determine cluster id for deployment %s: %s", KcpSyncerDeploymentName, err)
+		}
+		id, err := getClusterId(dep)
+		if err != nil {
+			return err
+		}
+		cluster = id
+		namespace = "kcp-network"
+	} else if token.ObjectMeta.Annotations != nil && token.ObjectMeta.Annotations["skupper.io/type"] == "pull-secret" {
+		log.Printf("PullSecret event for %s", key)
+		cluster = token.ObjectMeta.Annotations["skupper.io/cluster"]
+		namespace = token.ObjectMeta.Annotations["skupper.io/namespace"]
+	} else {
+		log.Printf("Ignoring secret event for %s", key)
+		return nil
+	}
+
 	if mgr, ok := c.networkManagers[key]; ok {
 		if !mgr.HasChanged(token) {
 			return nil
 		}
 		mgr.Stop()
 	}
-	mgr, err := kube.NewNetworkManager(c.generateToken, c.vanClient.KubeClient, c.controller, c.stopCh, token)
+	mgr, err := kube.NewNetworkManager(c.generateToken, c.vanClient.KubeClient, c.controller, c.stopCh, token.Data["kubeconfig"], namespace, cluster)
 	if err != nil {
 		return err
 	}

@@ -60,3 +60,12 @@ func ContainerForTransport(ds types.DeploymentSpec) corev1.Container {
 	setResourceRequests(&container, &ds)
 	return container
 }
+
+func GetContainerByName(containers []corev1.Container, name string) *corev1.Container {
+	for _, c := range containers {
+		if c.Name == name {
+			return &c
+		}
+	}
+	return nil
+}

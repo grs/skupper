@@ -40,11 +40,18 @@ type NetworkManager struct {
 	secrets    *SecretWatcher
 }
 
-func NewNetworkManager(generator TokenGenerator, actClient kubernetes.Interface, controller *Controller, stopCh <-chan struct{}, token *corev1.Secret) (*NetworkManager, error) {
+func NewNetworkManagerFromPullSecret(generator TokenGenerator, actClient kubernetes.Interface, controller *Controller, stopCh <-chan struct{}, token *corev1.Secret) (*NetworkManager, error) {
+	cluster   := token.ObjectMeta.Annotations["skupper.io/cluster"]
+	namespace := token.ObjectMeta.Annotations["skupper.io/namespace"]
+	config    := token.Data["kubeconfig"]
+	return NewNetworkManager(generator, actClient, controller, stopCh, config, namespace, cluster)
+}
+
+func NewNetworkManager(generator TokenGenerator, actClient kubernetes.Interface, controller *Controller, stopCh <-chan struct{}, defConfig []byte, defNamespace string, clusterId string) (*NetworkManager, error) {
 	mgr := &NetworkManager {
-		cluster:   token.ObjectMeta.Annotations["skupper.io/cluster"],
-		namespace: token.ObjectMeta.Annotations["skupper.io/namespace"],
-		config:    token.Data["kubeconfig"],
+		cluster:   clusterId,
+		namespace: defNamespace,
+		config:    defConfig,
 		actClient: actClient,
 		sites:     map[string]string{},
 		generator: generator,
@@ -179,6 +186,7 @@ func (n *NetworkManager) siteDeleted(name string) error {
 }
 
 func (n *NetworkManager) servicesEvent(key string, link *corev1.ConfigMap) error {
+	log.Printf("Service update for %s", link.ObjectMeta.Name)
 	namespace, ok := link.ObjectMeta.Labels["skupper.io/namespace"]
 	if !ok {
 		log.Printf("Invalid services, no 'skupper.io/namespace' label on ConfigMap %q", link.ObjectMeta.Name)
@@ -186,12 +194,14 @@ func (n *NetworkManager) servicesEvent(key string, link *corev1.ConfigMap) error
 	}
 	actual, err := n.actClient.CoreV1().ConfigMaps(namespace).Get("skupper-services", metav1.GetOptions{})
 	if errors.IsNotFound(err) {
+		log.Printf("Creating service config in %s", namespace)
 		_, err = NewConfigMap("skupper-services", &link.Data, nil, nil, nil, namespace, n.actClient)
 		return err
 	} else if err != nil {
 		return err
 	} else {
 		actual.Data = link.Data
+		log.Printf("Updating service config in %s", namespace)
 		_, err = n.actClient.CoreV1().ConfigMaps(namespace).Update(actual)
 		return err
 	}
