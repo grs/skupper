@@ -20,6 +20,7 @@ import (
 
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 type SiteController struct {
@@ -40,7 +41,7 @@ func NewSiteController(cli *client.VanClient) (*SiteController, error) {
 		watchNamespace = metav1.NamespaceAll
 		log.Println("Skupper site controller watching all namespaces")
 	}
-	log.Printf("Version: %s", client.Version)
+	log.Printf("Version: %s", version.Version)
 
 	siteInformer := corev1informer.NewFilteredConfigMapInformer(
 		cli.KubeClient,
@@ -115,7 +116,7 @@ func (c *SiteController) Run(stopCh <-chan struct{}) error {
 	if ok := cache.WaitForCacheSync(stopCh, c.siteInformer.HasSynced); !ok {
 		return fmt.Errorf("Failed to wait for caches to sync")
 	}
-	log.Printf("Checking if sites need updates (%s)", client.Version)
+	log.Printf("Checking if sites need updates (%s)", version.Version)
 	c.updateChecks()
 	log.Println("Starting workers")
 	go wait.Until(c.run, time.Second, stopCh)

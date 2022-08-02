@@ -16,6 +16,7 @@ import (
 
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/kube"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 var onlyOneSignalHandler = make(chan struct{})
@@ -42,13 +43,13 @@ func main() {
 	isVersion := flag.Bool("version", false, "Report the version of Config Sync")
 	flag.Parse()
 	if *isVersion {
-		fmt.Println(client.Version)
+		fmt.Println(version.Version)
 		os.Exit(0)
 	}
 
 	// Startup message
 	log.Printf("Config Sync")
-	log.Printf("Version: %s", client.Version)
+	log.Printf("Version: %s", version.Version)
 
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := SetupSignalHandler()

@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/version"
 )
 
@@ -45,19 +44,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	namespace := os.Getenv("NAMESPACE")
-	kubeconfig := os.Getenv("KUBECONFIG")
 
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := SetupSignalHandler()
 
-	// todo, get context from env?
-	cli, err := client.NewClient(namespace, "", kubeconfig)
-	if err != nil {
-		log.Fatal("Error getting van client ", err.Error())
-	}
-
-	controller, err := NewSiteController(cli)
+	controller, err := NewSiteController()
 	if err != nil {
 		log.Fatal("Error getting new site controller ", err.Error())
 	}

@@ -1,0 +1,9 @@
+apiVersion: skupper.io/v1alpha1
+kind: EgressBinding
+metadata:
+  name: http-echo
+spec:
+  host: myservice
+  ports:
+  - name: http
+    port: 8080

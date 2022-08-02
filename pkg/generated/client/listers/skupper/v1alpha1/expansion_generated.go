@@ -18,6 +18,30 @@ limitations under the License.
 
 package v1alpha1
 
+// EgressBindingListerExpansion allows custom methods to be added to
+// EgressBindingLister.
+type EgressBindingListerExpansion interface{}
+
+// EgressBindingNamespaceListerExpansion allows custom methods to be added to
+// EgressBindingNamespaceLister.
+type EgressBindingNamespaceListerExpansion interface{}
+
+// IngressBindingListerExpansion allows custom methods to be added to
+// IngressBindingLister.
+type IngressBindingListerExpansion interface{}
+
+// IngressBindingNamespaceListerExpansion allows custom methods to be added to
+// IngressBindingNamespaceLister.
+type IngressBindingNamespaceListerExpansion interface{}
+
+// SiteListerExpansion allows custom methods to be added to
+// SiteLister.
+type SiteListerExpansion interface{}
+
+// SiteNamespaceListerExpansion allows custom methods to be added to
+// SiteNamespaceLister.
+type SiteNamespaceListerExpansion interface{}
+
 // SkupperClusterPolicyListerExpansion allows custom methods to be added to
 // SkupperClusterPolicyLister.
 type SkupperClusterPolicyListerExpansion interface{}

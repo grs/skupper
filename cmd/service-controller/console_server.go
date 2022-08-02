@@ -21,6 +21,7 @@ import (
 	"github.com/skupperproject/skupper/pkg/data"
 	"github.com/skupperproject/skupper/pkg/event"
 	"github.com/skupperproject/skupper/pkg/qdr"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 const (
@@ -101,7 +102,7 @@ func (server *ConsoleServer) httpInternalError(w http.ResponseWriter, err error)
 func (server *ConsoleServer) version() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		v := VersionInfo{
-			ServiceControllerVersion: client.Version,
+			ServiceControllerVersion: version.Version,
 		}
 		agent, err := server.agentPool.Get()
 		if err != nil {

@@ -61,6 +61,22 @@ func InitialConfig(id string, siteId string, version string, edge bool, helloAge
 	return config
 }
 
+func NewRouterConfig() *RouterConfig {
+	return &RouterConfig{
+		Addresses:   map[string]Address{},
+		SslProfiles: map[string]SslProfile{},
+		Listeners:   map[string]Listener{},
+		Connectors:  map[string]Connector{},
+		LogConfig:   map[string]LogConfig{},
+		Bridges: BridgeConfig{
+			TcpListeners:   map[string]TcpEndpoint{},
+			TcpConnectors:  map[string]TcpEndpoint{},
+			HttpListeners:  map[string]HttpEndpoint{},
+			HttpConnectors: map[string]HttpEndpoint{},
+		},
+	}
+}
+
 func NewBridgeConfig() BridgeConfig {
 	return BridgeConfig{
 		TcpListeners:   map[string]TcpEndpoint{},
@@ -87,15 +103,23 @@ func NewBridgeConfigCopy(src BridgeConfig) BridgeConfig {
 	return newBridges
 }
 
-func (r *RouterConfig) AddListener(l Listener) {
+func (r *RouterConfig) AddListener(l Listener) bool {
 	if l.Name == "" {
 		l.Name = fmt.Sprintf("%s@%d", l.Host, l.Port)
 	}
+	if existing, ok := r.Listeners[l.Name]; ok && existing == l {
+		return false
+	}
 	r.Listeners[l.Name] = l
+	return true
 }
 
-func (r *RouterConfig) AddConnector(c Connector) {
+func (r *RouterConfig) AddConnector(c Connector) bool {
+	if existing, ok := r.Connectors[c.Name]; ok && existing == c {
+		return false
+	}
 	r.Connectors[c.Name] = c
+	return true
 }
 
 func (r *RouterConfig) RemoveConnector(name string) (bool, Connector) {
@@ -112,13 +136,17 @@ func (r *RouterConfig) IsEdge() bool {
 	return r.Metadata.Mode == ModeEdge
 }
 
-func (r *RouterConfig) AddSslProfileWithPath(path string, s SslProfile) {
+func (r *RouterConfig) AddSslProfileWithPath(path string, s SslProfile) bool {
 	if s.CertFile == "" && s.CaCertFile == "" && s.PrivateKeyFile == "" {
 		s.CertFile = fmt.Sprintf(path+"/%s/tls.crt", s.Name)
 		s.PrivateKeyFile = fmt.Sprintf(path+"/%s/tls.key", s.Name)
 		s.CaCertFile = fmt.Sprintf(path+"/%s/ca.crt", s.Name)
 	}
+	if existing, ok := r.SslProfiles[s.Name]; ok && existing == s {
+		return false
+	}
 	r.SslProfiles[s.Name] = s
+	return true
 }
 
 func (r *RouterConfig) AddSimpleSslProfileWithPath(path string, s SslProfile) {
@@ -128,8 +156,8 @@ func (r *RouterConfig) AddSimpleSslProfileWithPath(path string, s SslProfile) {
 	r.SslProfiles[s.Name] = s
 }
 
-func (r *RouterConfig) AddSslProfile(s SslProfile) {
-	r.AddSslProfileWithPath("/etc/skupper-router-certs", s)
+func (r *RouterConfig) AddSslProfile(s SslProfile) bool {
+	return r.AddSslProfileWithPath("/etc/skupper-router-certs", s)
 }
 
 func (r *RouterConfig) RemoveSslProfile(name string) bool {
@@ -142,36 +170,40 @@ func (r *RouterConfig) RemoveSslProfile(name string) bool {
 	}
 }
 
-func (r *RouterConfig) AddAddress(a Address) {
+func (r *RouterConfig) AddAddress(a Address) bool {
+	if existing, ok := r.Addresses[a.Prefix]; ok && existing == a {
+		return false
+	}
 	r.Addresses[a.Prefix] = a
+	return true
 }
 
-func (r *RouterConfig) AddTcpConnector(e TcpEndpoint) {
-	r.Bridges.AddTcpConnector(e)
+func (r *RouterConfig) AddTcpConnector(e TcpEndpoint) bool {
+	return r.Bridges.AddTcpConnector(e)
 }
 
 func (r *RouterConfig) RemoveTcpConnector(name string) (bool, TcpEndpoint) {
 	return r.Bridges.RemoveTcpConnector(name)
 }
 
-func (r *RouterConfig) AddTcpListener(e TcpEndpoint) {
-	r.Bridges.AddTcpListener(e)
+func (r *RouterConfig) AddTcpListener(e TcpEndpoint) bool {
+	return r.Bridges.AddTcpListener(e)
 }
 
 func (r *RouterConfig) RemoveTcpListener(name string) (bool, TcpEndpoint) {
 	return r.Bridges.RemoveTcpListener(name)
 }
 
-func (r *RouterConfig) AddHttpConnector(e HttpEndpoint) {
-	r.Bridges.AddHttpConnector(e)
+func (r *RouterConfig) AddHttpConnector(e HttpEndpoint) bool {
+	return r.Bridges.AddHttpConnector(e)
 }
 
 func (r *RouterConfig) RemoveHttpConnector(name string) (bool, HttpEndpoint) {
 	return r.Bridges.RemoveHttpConnector(name)
 }
 
-func (r *RouterConfig) AddHttpListener(e HttpEndpoint) {
-	r.Bridges.AddHttpListener(e)
+func (r *RouterConfig) AddHttpListener(e HttpEndpoint) bool {
+	return r.Bridges.AddHttpListener(e)
 }
 
 func (r *RouterConfig) RemoveHttpListener(name string) (bool, HttpEndpoint) {
@@ -195,8 +227,12 @@ func (r *RouterConfig) SetSiteMetadata(site *SiteMetadata) {
 	r.Metadata.Metadata = getSiteMetadataString(site.Id, site.Version)
 }
 
-func (bc *BridgeConfig) AddTcpConnector(e TcpEndpoint) {
+func (bc *BridgeConfig) AddTcpConnector(e TcpEndpoint) bool {
+	if existing, ok := bc.TcpConnectors[e.Name]; ok && existing.Equivalent(e) {
+		return false
+	}
 	bc.TcpConnectors[e.Name] = e
+	return true
 }
 
 func (bc *BridgeConfig) RemoveTcpConnector(name string) (bool, TcpEndpoint) {
@@ -209,8 +245,12 @@ func (bc *BridgeConfig) RemoveTcpConnector(name string) (bool, TcpEndpoint) {
 	}
 }
 
-func (bc *BridgeConfig) AddTcpListener(e TcpEndpoint) {
+func (bc *BridgeConfig) AddTcpListener(e TcpEndpoint) bool {
+	if existing, ok := bc.TcpListeners[e.Name]; ok && existing.Equivalent(e) {
+		return false
+	}
 	bc.TcpListeners[e.Name] = e
+	return true
 }
 
 func (bc *BridgeConfig) RemoveTcpListener(name string) (bool, TcpEndpoint) {
@@ -223,8 +263,12 @@ func (bc *BridgeConfig) RemoveTcpListener(name string) (bool, TcpEndpoint) {
 	}
 }
 
-func (bc *BridgeConfig) AddHttpConnector(e HttpEndpoint) {
+func (bc *BridgeConfig) AddHttpConnector(e HttpEndpoint) bool {
+	if existing, ok := bc.HttpConnectors[e.Name]; ok && existing.Equivalent(e) {
+		return false
+	}
 	bc.HttpConnectors[e.Name] = e
+	return true
 }
 
 func (bc *BridgeConfig) RemoveHttpConnector(name string) (bool, HttpEndpoint) {
@@ -237,8 +281,12 @@ func (bc *BridgeConfig) RemoveHttpConnector(name string) (bool, HttpEndpoint) {
 	}
 }
 
-func (bc *BridgeConfig) AddHttpListener(e HttpEndpoint) {
+func (bc *BridgeConfig) AddHttpListener(e HttpEndpoint) bool {
+	if existing, ok := bc.HttpListeners[e.Name]; ok && existing.Equivalent(e) {
+		return false
+	}
 	bc.HttpListeners[e.Name] = e
+	return true
 }
 
 func (bc *BridgeConfig) RemoveHttpListener(name string) (bool, HttpEndpoint) {
@@ -326,6 +374,14 @@ func (r *RouterConfig) SetLogLevels(levels map[string]string) bool {
 		}
 	}
 	return changed
+}
+
+func (r *RouterConfig) ConfigureLogging(logConfig []types.RouterLogConfig) bool {
+	levels := map[string]string{}
+	for _, l := range logConfig {
+		levels[l.Module] = l.Level
+	}
+	return r.SetLogLevels(levels)
 }
 
 type Role string
@@ -728,6 +784,12 @@ func GetBridgeConfigFromConfigMap(configmap *corev1.ConfigMap) (*BridgeConfig, e
 		return nil, err
 	}
 	return &routerConfig.Bridges, nil
+}
+
+type ListenerDifference struct {
+	Deleted          []Connector
+	Added            []Connector
+	AddedSslProfiles map[string]SslProfile
 }
 
 type ConnectorDifference struct {

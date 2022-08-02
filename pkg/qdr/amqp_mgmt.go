@@ -63,6 +63,10 @@ func getSiteMetadata(metadata string) SiteMetadata {
 	return result
 }
 
+func GetSiteMetadataString(siteId string, version string) string {
+	return getSiteMetadataString(siteId, version)
+}
+
 func getSiteMetadataString(siteId string, version string) string {
 	siteDetails := SiteMetadata{
 		Id:      siteId,

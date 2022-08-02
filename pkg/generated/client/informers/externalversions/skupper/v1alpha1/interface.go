@@ -24,6 +24,12 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
+	// EgressBindings returns a EgressBindingInformer.
+	EgressBindings() EgressBindingInformer
+	// IngressBindings returns a IngressBindingInformer.
+	IngressBindings() IngressBindingInformer
+	// Sites returns a SiteInformer.
+	Sites() SiteInformer
 	// SkupperClusterPolicies returns a SkupperClusterPolicyInformer.
 	SkupperClusterPolicies() SkupperClusterPolicyInformer
 }
@@ -37,6 +43,21 @@ type version struct {
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+// EgressBindings returns a EgressBindingInformer.
+func (v *version) EgressBindings() EgressBindingInformer {
+	return &egressBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// IngressBindings returns a IngressBindingInformer.
+func (v *version) IngressBindings() IngressBindingInformer {
+	return &ingressBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// Sites returns a SiteInformer.
+func (v *version) Sites() SiteInformer {
+	return &siteInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // SkupperClusterPolicies returns a SkupperClusterPolicyInformer.

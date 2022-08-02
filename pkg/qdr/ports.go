@@ -1,11 +1,9 @@
-package main
+package qdr
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/skupperproject/skupper/pkg/qdr"
 )
 
 type PortRange struct {
@@ -22,7 +20,7 @@ const (
 	MAX_PORT = 65535
 )
 
-func newFreePorts() *FreePorts {
+func NewFreePorts() *FreePorts {
 	return &FreePorts{
 		Available: []PortRange{
 			PortRange{
@@ -131,7 +129,7 @@ func (ports *FreePorts) String() string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func (ports *FreePorts) release(port int) bool {
+func (ports *FreePorts) Release(port int) bool {
 	var i int
 	for i = 0; i < len(ports.Available) && port >= (ports.Available[i].Start-1); i++ {
 		if ports.Available[i].contains(port) {
@@ -181,7 +179,7 @@ func (ports *FreePorts) inuse(port int) bool {
 	return false
 }
 
-func (ports *FreePorts) nextFreePort() (int, error) {
+func (ports *FreePorts) NextFreePort() (int, error) {
 	if len(ports.Available) > 0 {
 		next := ports.Available[0].Start
 		ports.inuse(next)
@@ -196,7 +194,7 @@ func portAsInt(port string) int {
 	return result
 }
 
-func (ports *FreePorts) getPortAllocations(bridges *qdr.BridgeConfig) map[string][]int {
+func (ports *FreePorts) GetPortAllocations(bridges *BridgeConfig) map[string][]int {
 	allocations := map[string][]int{}
 	addPort := func(address string, port int) {
 		if curPorts, found := allocations[address]; !found {
@@ -229,4 +227,27 @@ func (ports *FreePorts) getPortAllocations(bridges *qdr.BridgeConfig) map[string
 		}
 	}
 	return allocations
+}
+
+func (ports *FreePorts) GetPortMappings(config *RouterConfig) map[string]int {
+	mappings := map[string]int{}
+	for _, l := range config.Listeners {
+		ports.inuse(int(l.Port))
+	}
+	for _, l := range config.Bridges.HttpListeners {
+		port := portAsInt(l.Port)
+		mappings[l.Name] = port
+		ports.inuse(port)
+	}
+	for _, l := range config.Bridges.TcpListeners {
+		port := portAsInt(l.Port)
+		mappings[l.Name] = port
+		ports.inuse(port)
+	}
+	return mappings
+}
+
+//TODO: get rid of the need for this
+func (ports *FreePorts) Reserved(port int) {
+	ports.inuse(port)
 }

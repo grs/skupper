@@ -28,6 +28,18 @@ type FakeSkupperV1alpha1 struct {
 	*testing.Fake
 }
 
+func (c *FakeSkupperV1alpha1) EgressBindings(namespace string) v1alpha1.EgressBindingInterface {
+	return &FakeEgressBindings{c, namespace}
+}
+
+func (c *FakeSkupperV1alpha1) IngressBindings(namespace string) v1alpha1.IngressBindingInterface {
+	return &FakeIngressBindings{c, namespace}
+}
+
+func (c *FakeSkupperV1alpha1) Sites(namespace string) v1alpha1.SiteInterface {
+	return &FakeSites{c, namespace}
+}
+
 func (c *FakeSkupperV1alpha1) SkupperClusterPolicies() v1alpha1.SkupperClusterPolicyInterface {
 	return &FakeSkupperClusterPolicies{c}
 }

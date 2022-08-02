@@ -26,7 +26,7 @@ var (
 )
 
 func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(SchemeGroupVersion, &SkupperClusterPolicy{}, &SkupperClusterPolicyList{})
+	scheme.AddKnownTypes(SchemeGroupVersion, &SkupperClusterPolicy{}, &SkupperClusterPolicyList{}, &Site{}, &SiteList{}, &IngressBinding{}, &IngressBindingList{}, &EgressBinding{}, &EgressBindingList{}, )
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
 }

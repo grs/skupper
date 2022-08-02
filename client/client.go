@@ -19,7 +19,6 @@ import (
 	"github.com/skupperproject/skupper/pkg/kube"
 )
 
-var Version = "undefined"
 var minimumCompatibleVersion = "0.8.0"
 var defaultRetry = wait.Backoff{
 	Steps:    100,

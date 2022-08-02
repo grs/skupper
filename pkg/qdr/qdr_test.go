@@ -62,6 +62,22 @@ func TestAddListener(t *testing.T) {
 	if config.Listeners["127.0.0.1@8888"].Name != "127.0.0.1@8888" {
 		t.Errorf("Expected name '127.0.0.1@8888' but got %q", config.Listeners["127.0.0.1@8888"].Name)
 	}
+	if config.AddListener(Listener{
+		Name: "l1",
+		Port: 5672,
+	}) {
+		t.Errorf("Expected result to be false")
+	}
+	if config.AddListener(Listener{
+		Name: "l1",
+		Port: 8888,
+	}) {
+		if config.Listeners["l1"].Port != 8888 {
+			t.Errorf("Expected port 8888 but got %d", config.Listeners["l1"].Port)
+		}
+	} else {
+		t.Errorf("Expected result to be true")
+	}
 }
 
 func TestAddSslProfile(t *testing.T) {
@@ -95,6 +111,12 @@ func TestAddAddress(t *testing.T) {
 	})
 	if config.Addresses["foo"].Distribution != "multicast" {
 		t.Errorf("Expected distribution %q but got %q", DistributionMulticast, config.Addresses["foo"].Distribution)
+	}
+	if config.AddAddress(Address{
+		Prefix:       "foo",
+		Distribution: DistributionMulticast,
+	}) {
+		t.Errorf("Expected result to be false")
 	}
 }
 

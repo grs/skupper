@@ -22,6 +22,7 @@ import (
 	"github.com/skupperproject/skupper/pkg/kube"
 	"github.com/skupperproject/skupper/pkg/qdr"
 	"github.com/skupperproject/skupper/pkg/utils"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 func OauthProxyContainer(serviceAccount string, servicePort string) *corev1.Container {
@@ -534,7 +535,7 @@ func (cli *VanClient) GetRouterSpecFromOpts(options types.SiteConfigSpec, siteId
 	}
 
 	isEdge := options.RouterMode == string(types.TransportModeEdge)
-	routerConfig := qdr.InitialConfig(van.Name+"-${HOSTNAME}", siteId, Version, isEdge, 3)
+	routerConfig := qdr.InitialConfig(van.Name+"-${HOSTNAME}", siteId, version.Version, isEdge, 3)
 	if options.Router.Logging != nil {
 		configureRouterLogging(&routerConfig, options.Router.Logging)
 	}

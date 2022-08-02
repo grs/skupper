@@ -20,6 +20,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/utils"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 type ExposeOptions struct {
@@ -535,7 +536,7 @@ func NewCmdUpdate(newClient cobraFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "update",
 		Short:  "Update skupper installation version",
-		Long:   "Update the skupper site to " + client.Version,
+		Long:   "Update the skupper site to " + version.Version,
 		Args:   cobra.NoArgs,
 		PreRun: newClient,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1626,7 +1627,7 @@ func NewCmdVersion(newClient cobraFunc) *cobra.Command {
 		PreRun: newClient,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			silenceCobra(cmd)
-			fmt.Printf("%-30s %s\n", "client version", client.Version)
+			fmt.Printf("%-30s %s\n", "client version", version.Version)
 			if !IsZero(reflect.ValueOf(cli)) {
 				fmt.Printf("%-30s %s\n", "transport version", cli.GetVersion(types.TransportComponentName, types.TransportContainerName))
 				fmt.Printf("%-30s %s\n", "controller version", cli.GetVersion(types.ControllerComponentName, types.ControllerContainerName))
@@ -1657,7 +1658,7 @@ func NewCmdDebugDump(newClient cobraFunc) *cobra.Command {
 		PreRun: newClient,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			silenceCobra(cmd)
-			file, err := cli.SkupperDump(context.Background(), args[0], client.Version, kubeConfigPath, kubeContext)
+			file, err := cli.SkupperDump(context.Background(), args[0], version.Version, kubeConfigPath, kubeContext)
 			if err != nil {
 				return fmt.Errorf("Unable to save skupper dump details: %w", err)
 			} else {

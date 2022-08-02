@@ -31,6 +31,7 @@ import (
 	"github.com/skupperproject/skupper/pkg/qdr"
 	"github.com/skupperproject/skupper/pkg/service"
 	"github.com/skupperproject/skupper/pkg/service_sync"
+	"github.com/skupperproject/skupper/pkg/version"
 )
 
 type Controller struct {
@@ -45,7 +46,7 @@ type Controller struct {
 	// control loop state:
 	events   workqueue.RateLimitingInterface
 	bindings map[string]*service.ServiceBindings
-	ports    *FreePorts
+	ports    *qdr.FreePorts
 
 	// service_sync state:
 	disableServiceSync bool
@@ -153,7 +154,7 @@ func NewController(cli *client.VanClient, origin string, tlsConfig *tls.Config, 
 		svcInformer:        svcInformer,
 		headlessInformer:   headlessInformer,
 		events:             events,
-		ports:              newFreePorts(),
+		ports:              qdr.NewFreePorts(),
 		disableServiceSync: disableServiceSync,
 	}
 	AddStaticPolicyWatcher(controller.policy)
@@ -181,7 +182,7 @@ func NewController(cli *client.VanClient, origin string, tlsConfig *tls.Config, 
 	handler := func(changed []types.ServiceInterface, deleted []string, origin string) error {
 		return kube.UpdateSkupperServices(changed, deleted, origin, cli.Namespace, cli.KubeClient)
 	}
-	controller.serviceSync = service_sync.NewServiceSync(origin, client.Version, qdr.NewConnectionFactory("amqps://"+types.QualifiedServiceName(types.LocalTransportServiceName, cli.Namespace)+":5671", tlsConfig), handler)
+	controller.serviceSync = service_sync.NewServiceSync(origin, version.Version, qdr.NewConnectionFactory("amqps://"+types.QualifiedServiceName(types.LocalTransportServiceName, cli.Namespace)+":5671", tlsConfig), handler)
 
 	controller.policyHandler = NewPolicyController(controller.vanClient)
 	return controller, nil
@@ -499,15 +500,15 @@ func (c *Controller) initialiseServiceBindingsMap() (map[string][]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	allocations := c.ports.getPortAllocations(bridges)
+	allocations := c.ports.GetPortAllocations(bridges)
 	// TODO: should deduce the ports in use by the router by
 	// reading config rather than hardcoding them here
-	c.ports.inuse(int(types.AmqpDefaultPort))
-	c.ports.inuse(int(types.AmqpsDefaultPort))
-	c.ports.inuse(int(types.EdgeListenerPort))
-	c.ports.inuse(int(types.InterRouterListenerPort))
-	c.ports.inuse(int(types.ConsoleDefaultServicePort))
-	c.ports.inuse(9090) // currently hardcoded in config
+	c.ports.Reserved(int(types.AmqpDefaultPort))
+	c.ports.Reserved(int(types.AmqpsDefaultPort))
+	c.ports.Reserved(int(types.EdgeListenerPort))
+	c.ports.Reserved(int(types.InterRouterListenerPort))
+	c.ports.Reserved(int(types.ConsoleDefaultServicePort))
+	c.ports.Reserved(9090) // currently hardcoded in config
 	return allocations, nil
 
 }
@@ -530,7 +531,7 @@ func (c *Controller) deleteHeadlessProxy(statefulset *appsv1.StatefulSet) error 
 
 func (c *Controller) ensureHeadlessProxyFor(bindings *service.ServiceBindings, statefulset *appsv1.StatefulSet) error {
 	serviceInterface := bindings.AsServiceInterface()
-	config, err := qdr.GetRouterConfigForHeadlessProxy(serviceInterface, c.origin, client.Version, c.vanClient.Namespace)
+	config, err := qdr.GetRouterConfigForHeadlessProxy(serviceInterface, c.origin, version.Version, c.vanClient.Namespace)
 	if err != nil {
 		return err
 	}
@@ -541,7 +542,7 @@ func (c *Controller) ensureHeadlessProxyFor(bindings *service.ServiceBindings, s
 
 func (c *Controller) createHeadlessProxyFor(bindings *service.ServiceBindings) error {
 	serviceInterface := bindings.AsServiceInterface()
-	config, err := qdr.GetRouterConfigForHeadlessProxy(serviceInterface, c.origin, client.Version, c.vanClient.Namespace)
+	config, err := qdr.GetRouterConfigForHeadlessProxy(serviceInterface, c.origin, version.Version, c.vanClient.Namespace)
 	if err != nil {
 		return err
 	}
@@ -859,7 +860,7 @@ func (c *Controller) updateServiceBindings(required types.ServiceInterface, port
 			}
 			if len(ports) == 0 {
 				for i := 0; i < len(required.Ports); i++ {
-					port, err := c.ports.nextFreePort()
+					port, err := c.ports.NextFreePort()
 					if err != nil {
 						return err
 					}
