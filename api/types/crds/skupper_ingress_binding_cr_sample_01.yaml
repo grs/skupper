@@ -1,8 +1,0 @@
-apiVersion: skupper.io/v1alpha1
-kind: IngressBinding
-metadata:
-  name: http-echo
-spec:
-  ports:
-  - name: http
-    port: 8080

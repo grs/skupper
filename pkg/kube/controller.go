@@ -502,10 +502,10 @@ func (w *SiteWatcher) List() []*skupperv1alpha1.Site {
 	return results
 }
 
-func (c *Controller) WatchIngressBindings(namespace string, handler IngressBindingHandler) *IngressBindingWatcher {
-	watcher := &IngressBindingWatcher{
+func (c *Controller) WatchRequiredServices(namespace string, handler RequiredServiceHandler) *RequiredServiceWatcher {
+	watcher := &RequiredServiceWatcher{
 		handler:   handler,
-		informer:  skupperv1alpha1informer.NewIngressBindingInformer(
+		informer:  skupperv1alpha1informer.NewRequiredServiceInformer(
 			c.skupperClient,
 			namespace,
 			time.Second*30,
@@ -517,15 +517,15 @@ func (c *Controller) WatchIngressBindings(namespace string, handler IngressBindi
 	return watcher
 }
 
-type IngressBindingHandler func(string, *skupperv1alpha1.IngressBinding) error
+type RequiredServiceHandler func(string, *skupperv1alpha1.RequiredService) error
 
-type IngressBindingWatcher struct {
-	handler   IngressBindingHandler
+type RequiredServiceWatcher struct {
+	handler   RequiredServiceHandler
 	informer  cache.SharedIndexInformer
 	namespace string
 }
 
-func (w *IngressBindingWatcher) Handle(event ResourceChange) error {
+func (w *RequiredServiceWatcher) Handle(event ResourceChange) error {
 	obj, err := w.Get(event.Key)
 	if err != nil {
 		return err
@@ -533,19 +533,19 @@ func (w *IngressBindingWatcher) Handle(event ResourceChange) error {
 	return w.handler(event.Key, obj)
 }
 
-func (w *IngressBindingWatcher) Describe(event ResourceChange) string {
-	return fmt.Sprintf("IngressBinding %s", event.Key)
+func (w *RequiredServiceWatcher) Describe(event ResourceChange) string {
+	return fmt.Sprintf("RequiredService %s", event.Key)
 }
 
-func (w *IngressBindingWatcher) Start(stopCh <-chan struct{}) {
+func (w *RequiredServiceWatcher) Start(stopCh <-chan struct{}) {
 	go w.informer.Run(stopCh)
 }
 
-func (w *IngressBindingWatcher) Sync(stopCh <-chan struct{}) bool {
+func (w *RequiredServiceWatcher) Sync(stopCh <-chan struct{}) bool {
 	return cache.WaitForCacheSync(stopCh, w.informer.HasSynced)
 }
 
-func (w *IngressBindingWatcher) Get(key string) (*skupperv1alpha1.IngressBinding, error) {
+func (w *RequiredServiceWatcher) Get(key string) (*skupperv1alpha1.RequiredService, error) {
 	entity, exists, err := w.informer.GetStore().GetByKey(key)
 	if err != nil {
 		return nil, err
@@ -553,22 +553,22 @@ func (w *IngressBindingWatcher) Get(key string) (*skupperv1alpha1.IngressBinding
 	if !exists {
 		return nil, nil
 	}
-	return entity.(*skupperv1alpha1.IngressBinding), nil
+	return entity.(*skupperv1alpha1.RequiredService), nil
 }
 
-func (w *IngressBindingWatcher) List() []*skupperv1alpha1.IngressBinding {
+func (w *RequiredServiceWatcher) List() []*skupperv1alpha1.RequiredService {
 	list := w.informer.GetStore().List()
-	results := []*skupperv1alpha1.IngressBinding{}
+	results := []*skupperv1alpha1.RequiredService{}
 	for _, o := range list {
-		results = append(results, o.(*skupperv1alpha1.IngressBinding))
+		results = append(results, o.(*skupperv1alpha1.RequiredService))
 	}
 	return results
 }
 
-func (c *Controller) WatchEgressBindings(namespace string, handler EgressBindingHandler) *EgressBindingWatcher {
-	watcher := &EgressBindingWatcher{
+func (c *Controller) WatchProvidedServices(namespace string, handler ProvidedServiceHandler) *ProvidedServiceWatcher {
+	watcher := &ProvidedServiceWatcher{
 		handler:   handler,
-		informer:  skupperv1alpha1informer.NewEgressBindingInformer(
+		informer:  skupperv1alpha1informer.NewProvidedServiceInformer(
 			c.skupperClient,
 			namespace,
 			time.Second*30,
@@ -580,15 +580,15 @@ func (c *Controller) WatchEgressBindings(namespace string, handler EgressBinding
 	return watcher
 }
 
-type EgressBindingHandler func(string, *skupperv1alpha1.EgressBinding) error
+type ProvidedServiceHandler func(string, *skupperv1alpha1.ProvidedService) error
 
-type EgressBindingWatcher struct {
-	handler   EgressBindingHandler
+type ProvidedServiceWatcher struct {
+	handler   ProvidedServiceHandler
 	informer  cache.SharedIndexInformer
 	namespace string
 }
 
-func (w *EgressBindingWatcher) Handle(event ResourceChange) error {
+func (w *ProvidedServiceWatcher) Handle(event ResourceChange) error {
 	obj, err := w.Get(event.Key)
 	if err != nil {
 		return err
@@ -596,19 +596,19 @@ func (w *EgressBindingWatcher) Handle(event ResourceChange) error {
 	return w.handler(event.Key, obj)
 }
 
-func (w *EgressBindingWatcher) Describe(event ResourceChange) string {
-	return fmt.Sprintf("EgressBinding %s", event.Key)
+func (w *ProvidedServiceWatcher) Describe(event ResourceChange) string {
+	return fmt.Sprintf("ProvidedService %s", event.Key)
 }
 
-func (w *EgressBindingWatcher) Start(stopCh <-chan struct{}) {
+func (w *ProvidedServiceWatcher) Start(stopCh <-chan struct{}) {
 	go w.informer.Run(stopCh)
 }
 
-func (w *EgressBindingWatcher) Sync(stopCh <-chan struct{}) bool {
+func (w *ProvidedServiceWatcher) Sync(stopCh <-chan struct{}) bool {
 	return cache.WaitForCacheSync(stopCh, w.informer.HasSynced)
 }
 
-func (w *EgressBindingWatcher) Get(key string) (*skupperv1alpha1.EgressBinding, error) {
+func (w *ProvidedServiceWatcher) Get(key string) (*skupperv1alpha1.ProvidedService, error) {
 	entity, exists, err := w.informer.GetStore().GetByKey(key)
 	if err != nil {
 		return nil, err
@@ -616,14 +616,14 @@ func (w *EgressBindingWatcher) Get(key string) (*skupperv1alpha1.EgressBinding, 
 	if !exists {
 		return nil, nil
 	}
-	return entity.(*skupperv1alpha1.EgressBinding), nil
+	return entity.(*skupperv1alpha1.ProvidedService), nil
 }
 
-func (w *EgressBindingWatcher) List() []*skupperv1alpha1.EgressBinding {
+func (w *ProvidedServiceWatcher) List() []*skupperv1alpha1.ProvidedService {
 	list := w.informer.GetStore().List()
-	results := []*skupperv1alpha1.EgressBinding{}
+	results := []*skupperv1alpha1.ProvidedService{}
 	for _, o := range list {
-		results = append(results, o.(*skupperv1alpha1.EgressBinding))
+		results = append(results, o.(*skupperv1alpha1.ProvidedService))
 	}
 	return results
 }

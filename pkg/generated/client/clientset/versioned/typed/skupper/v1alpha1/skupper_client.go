@@ -26,8 +26,8 @@ import (
 
 type SkupperV1alpha1Interface interface {
 	RESTClient() rest.Interface
-	EgressBindingsGetter
-	IngressBindingsGetter
+	ProvidedServicesGetter
+	RequiredServicesGetter
 	SitesGetter
 	SkupperClusterPoliciesGetter
 }
@@ -37,12 +37,12 @@ type SkupperV1alpha1Client struct {
 	restClient rest.Interface
 }
 
-func (c *SkupperV1alpha1Client) EgressBindings(namespace string) EgressBindingInterface {
-	return newEgressBindings(c, namespace)
+func (c *SkupperV1alpha1Client) ProvidedServices(namespace string) ProvidedServiceInterface {
+	return newProvidedServices(c, namespace)
 }
 
-func (c *SkupperV1alpha1Client) IngressBindings(namespace string) IngressBindingInterface {
-	return newIngressBindings(c, namespace)
+func (c *SkupperV1alpha1Client) RequiredServices(namespace string) RequiredServiceInterface {
+	return newRequiredServices(c, namespace)
 }
 
 func (c *SkupperV1alpha1Client) Sites(namespace string) SiteInterface {

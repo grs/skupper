@@ -18,9 +18,9 @@ limitations under the License.
 
 package v1alpha1
 
-type EgressBindingExpansion interface{}
+type ProvidedServiceExpansion interface{}
 
-type IngressBindingExpansion interface{}
+type RequiredServiceExpansion interface{}
 
 type SiteExpansion interface{}
 

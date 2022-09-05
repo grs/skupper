@@ -27,8 +27,8 @@ type SiteController struct {
 	controller            *kube.Controller
 	stopCh                <-chan struct{}
 	siteWatcher           *kube.SiteWatcher
-	ingressBindingWatcher *kube.IngressBindingWatcher
-	egressBindingWatcher  *kube.EgressBindingWatcher
+	ingressBindingWatcher *kube.RequiredServiceWatcher
+	egressBindingWatcher  *kube.ProvidedServiceWatcher
 	tokenWatcher          *kube.SecretWatcher
 	serverSecretWatcher   *kube.SecretWatcher
 	sites                 map[string]*kube.SiteManager
@@ -66,8 +66,8 @@ func NewSiteController() (*SiteController, error) {
 		sites:                map[string]*kube.SiteManager{},
 	}
 	controller.siteWatcher = controller.controller.WatchSites(watchNamespace, controller.checkSite)
-	controller.ingressBindingWatcher = controller.controller.WatchIngressBindings(watchNamespace, controller.checkIngressBinding)
-	controller.egressBindingWatcher = controller.controller.WatchEgressBindings(watchNamespace, controller.checkEgressBinding)
+	controller.ingressBindingWatcher = controller.controller.WatchRequiredServices(watchNamespace, controller.checkRequiredService)
+	controller.egressBindingWatcher = controller.controller.WatchProvidedServices(watchNamespace, controller.checkProvidedService)
 	controller.tokenWatcher = controller.controller.WatchSecrets(kube.ListByLabelSelector(types.TypeTokenQualifier), watchNamespace, controller.checkLink)
 	controller.serverSecretWatcher = controller.controller.WatchSecrets(kube.ListByName("skupper-site-server"), watchNamespace, controller.checkServerSecret)
 
@@ -159,7 +159,7 @@ func (c *SiteController) checkAddress(namespace string) error {
 	return nil
 }
 
-func (c *SiteController) checkIngressBinding(key string, binding *skupperv1alpha1.IngressBinding) error {
+func (c *SiteController) checkRequiredService(key string, binding *skupperv1alpha1.RequiredService) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		log.Printf("Error resolving namespace for %q: %s", key, err)
@@ -175,7 +175,7 @@ func (c *SiteController) checkIngressBinding(key string, binding *skupperv1alpha
 	}
 }
 
-func (c *SiteController) checkEgressBinding(key string, binding *skupperv1alpha1.EgressBinding) error {
+func (c *SiteController) checkProvidedService(key string, binding *skupperv1alpha1.ProvidedService) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		log.Printf("Error resolving namespace for %q: %s", key, err)

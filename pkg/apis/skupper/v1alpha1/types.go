@@ -76,22 +76,22 @@ type NamedValue struct {
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type IngressBinding struct {
+type RequiredService struct {
 	v1.TypeMeta   `json:",inline"`
 	v1.ObjectMeta `json:"metadata,omitempty"`
-	Spec          IngressBindingSpec `json:"spec,omitempty"`
+	Spec          RequiredServiceSpec `json:"spec,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// IngressBindingList contains a List of IngressBinding instances
-type IngressBindingList struct {
+// RequiredServiceList contains a List of RequiredService instances
+type RequiredServiceList struct {
 	v1.TypeMeta `json:",inline"`
 	v1.ListMeta `json:"metadata,omitempty"`
-	Items       []IngressBinding `json:"items"`
+	Items       []RequiredService `json:"items"`
 }
 
-type IngressBindingSpec struct {
+type RequiredServiceSpec struct {
 	Address string        `json:"address"`
 	Ports   []ServicePort `json:"ports,omitempty"`
 }
@@ -103,22 +103,22 @@ type ServicePort struct {
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type EgressBinding struct {
+type ProvidedService struct {
 	v1.TypeMeta   `json:",inline"`
 	v1.ObjectMeta `json:"metadata,omitempty"`
-	Spec          EgressBindingSpec `json:"spec,omitempty"`
+	Spec          ProvidedServiceSpec `json:"spec,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// EgressBindingList contains a List of EgressBinding instances
-type EgressBindingList struct {
+// ProvidedServiceList contains a List of ProvidedService instances
+type ProvidedServiceList struct {
 	v1.TypeMeta `json:",inline"`
 	v1.ListMeta `json:"metadata,omitempty"`
-	Items       []EgressBinding `json:"items"`
+	Items       []ProvidedService `json:"items"`
 }
 
-type EgressBindingSpec struct {
+type ProvidedServiceSpec struct {
 	Selector map[string]string `json:"selector,omitempty"`
 	Host     string            `json:"host,omitempty"`
 	Address  string            `json:"address"`

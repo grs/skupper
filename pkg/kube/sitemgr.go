@@ -37,13 +37,13 @@ import (
 )
 
 type EgressBinding struct {
-	binding   *skupperv1alpha1.EgressBinding
+	binding   *skupperv1alpha1.ProvidedService
 	watcher   *PodWatcher
 	connectors   map[string]qdr.TcpEndpoint
 }
 
 type IngressBinding struct {
-	binding     *skupperv1alpha1.IngressBinding
+	binding     *skupperv1alpha1.RequiredService
 	routerPorts map[string]int
 	listeners   map[string]qdr.TcpEndpoint
 }
@@ -61,7 +61,7 @@ type SiteManager struct {
 	haveServerSecret bool
 }
 
-func newIngressBinding(binding *skupperv1alpha1.IngressBinding) *IngressBinding {
+func newIngressBinding(binding *skupperv1alpha1.RequiredService) *IngressBinding {
 	return &IngressBinding{
 		binding:     binding,
 		routerPorts: map[string]int{},
@@ -69,7 +69,7 @@ func newIngressBinding(binding *skupperv1alpha1.IngressBinding) *IngressBinding 
 	}
 }
 
-func newEgressBinding(binding *skupperv1alpha1.EgressBinding) *EgressBinding {
+func newEgressBinding(binding *skupperv1alpha1.ProvidedService) *EgressBinding {
 	return &EgressBinding{
 		binding:     binding,
 		connectors:  map[string]qdr.TcpEndpoint{},
@@ -168,7 +168,7 @@ func (m *SiteManager) EnsureLink(secret *corev1.Secret) error {
 	return m.updateRouterConfig(newAddLinks(secret))
 }
 
-func (m *SiteManager) EnsureIngressBinding(binding *skupperv1alpha1.IngressBinding) error {
+func (m *SiteManager) EnsureIngressBinding(binding *skupperv1alpha1.RequiredService) error {
 	existing, ok := m.ingressBindings[binding.ObjectMeta.Name]
 	if ok {
 		existing.reconfigure(binding, m)
@@ -194,7 +194,7 @@ func (m *SiteManager) RemoveIngressBinding(name string) error {
 	return m.updateRouterConfig(&RemoveTcpListener{name})
 }
 
-func (m *SiteManager) EnsureEgressBinding(binding *skupperv1alpha1.EgressBinding) error {
+func (m *SiteManager) EnsureEgressBinding(binding *skupperv1alpha1.ProvidedService) error {
 	existing, ok := m.egressBindings[binding.ObjectMeta.Name]
 	if ok {
 		existing.binding = binding
@@ -883,7 +883,7 @@ func getEdgeListener() qdr.Listener {
 	}
 }
 
-func (b *IngressBinding) reconfigure(binding *skupperv1alpha1.IngressBinding, mgr *SiteManager) {
+func (b *IngressBinding) reconfigure(binding *skupperv1alpha1.RequiredService, mgr *SiteManager) {
 	b.binding = binding
 }
 

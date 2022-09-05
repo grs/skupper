@@ -53,10 +53,10 @@ func (f *genericInformer) Lister() cache.GenericLister {
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
 	// Group=skupper.io, Version=v1alpha1
-	case v1alpha1.SchemeGroupVersion.WithResource("egressbindings"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Skupper().V1alpha1().EgressBindings().Informer()}, nil
-	case v1alpha1.SchemeGroupVersion.WithResource("ingressbindings"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Skupper().V1alpha1().IngressBindings().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("providedservices"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Skupper().V1alpha1().ProvidedServices().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("requiredservices"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Skupper().V1alpha1().RequiredServices().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("sites"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Skupper().V1alpha1().Sites().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("skupperclusterpolicies"):

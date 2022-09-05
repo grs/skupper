@@ -24,10 +24,10 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
-	// EgressBindings returns a EgressBindingInformer.
-	EgressBindings() EgressBindingInformer
-	// IngressBindings returns a IngressBindingInformer.
-	IngressBindings() IngressBindingInformer
+	// ProvidedServices returns a ProvidedServiceInformer.
+	ProvidedServices() ProvidedServiceInformer
+	// RequiredServices returns a RequiredServiceInformer.
+	RequiredServices() RequiredServiceInformer
 	// Sites returns a SiteInformer.
 	Sites() SiteInformer
 	// SkupperClusterPolicies returns a SkupperClusterPolicyInformer.
@@ -45,14 +45,14 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// EgressBindings returns a EgressBindingInformer.
-func (v *version) EgressBindings() EgressBindingInformer {
-	return &egressBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+// ProvidedServices returns a ProvidedServiceInformer.
+func (v *version) ProvidedServices() ProvidedServiceInformer {
+	return &providedServiceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
-// IngressBindings returns a IngressBindingInformer.
-func (v *version) IngressBindings() IngressBindingInformer {
-	return &ingressBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+// RequiredServices returns a RequiredServiceInformer.
+func (v *version) RequiredServices() RequiredServiceInformer {
+	return &requiredServiceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // Sites returns a SiteInformer.
