@@ -4,6 +4,7 @@ SITE_CONTROLLER_IMAGE := quay.io/skupper/site-controller
 SITE_CONTROLLER_V2_IMAGE := quay.io/skupper/site-controller-v2
 NETWORK_CONTROLLER_IMAGE := quay.io/skupper/network-controller
 CONFIG_SYNC_IMAGE := quay.io/skupper/config-sync
+SITE_SYNCER_IMAGE := quay.io/skupper/site-syncer
 TEST_IMAGE := quay.io/skupper/skupper-tests
 TEST_BINARIES_FOLDER := ${PWD}/test/integration/bin
 DOCKER := docker
@@ -34,13 +35,16 @@ build-site-controller:
 build-site-controller-v2:
 	go build -ldflags="${LDFLAGS}"  -o site-controller-v2 cmd/site-controller-v2/main.go cmd/site-controller-v2/controller.go
 
+build-site-syncer:
+	go build -ldflags="${LDFLAGS}"  -o site-syncer cmd/syncer/main.go cmd/syncer/syncer.go
+
 build-network-controller:
 	go build -ldflags="${LDFLAGS}"  -o network-controller cmd/network-controller/main.go cmd/network-controller/controller.go
 
 build-config-sync:
 	go build -ldflags="${LDFLAGS}"  -o config-sync cmd/config-sync/main.go cmd/config-sync/config_sync.go
 
-build-controllers: build-site-controller build-site-controller-v2 build-service-controller build-network-controller
+build-controllers: build-site-controller build-site-controller-v2 build-service-controller build-network-controller build-site-syncer
 
 docker-build-test-image:
 	${DOCKER} build -t ${TEST_IMAGE} -f Dockerfile.ci-test .
@@ -50,6 +54,7 @@ docker-build: docker-build-test-image
 	${DOCKER} build -t ${SITE_CONTROLLER_IMAGE} -f Dockerfile.site-controller .
 	${DOCKER} build -t ${SITE_CONTROLLER_V2_IMAGE} -f Dockerfile.site-controller-v2 .
 	${DOCKER} build -t ${NETWORK_CONTROLLER_IMAGE} -f Dockerfile.network-controller .
+	${DOCKER} build -t ${SITE_SYNCER_IMAGE} -f Dockerfile.syncer .
 	${DOCKER} build -t ${CONFIG_SYNC_IMAGE} -f Dockerfile.config-sync .
 
 docker-push-test-image:
@@ -59,6 +64,7 @@ docker-push: docker-push-test-image
 	${DOCKER} push ${SERVICE_CONTROLLER_IMAGE}
 	${DOCKER} push ${SITE_CONTROLLER_IMAGE}
 	${DOCKER} push ${SITE_CONTROLLER_V2_IMAGE}
+	${DOCKER} push ${SITE_SYNCER_IMAGE}
 	${DOCKER} push ${CONFIG_SYNC_IMAGE}
 
 format:

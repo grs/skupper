@@ -56,15 +56,17 @@ type NetworkManager struct {
 	ca               *corev1.Secret
 	name             string
 	namespace        string
+	namespaceScoped  bool
 }
 
-func NewNetworkManager(client kubernetes.Interface, skupperClient skupperclient.Interface, name string, namespace string) *NetworkManager {
+func NewNetworkManager(client kubernetes.Interface, skupperClient skupperclient.Interface, name string, namespace string, namespaceScoped bool) *NetworkManager {
 	return &NetworkManager{
-		client:        client,
-		skupperClient: skupperClient,
-		sites:         map[string]*NetworkSite{},
-		name:          name,
-		namespace:     namespace,
+		client:          client,
+		skupperClient:   skupperClient,
+		sites:           map[string]*NetworkSite{},
+		name:            name,
+		namespace:       namespace,
+		namespaceScoped: namespaceScoped,
 	}
 }
 
@@ -165,6 +167,19 @@ func (s *NetworkSite) hasValidAddress() bool {
 	return false
 }
 
+func setSyncerLabelAndAnnotation(site *skupperv1alpha1.Site, secret *corev1.Secret, targetName string) {
+	if siteTarget := getAnnotation(site.ObjectMeta.Annotations, SyncTargetAnnotation); siteTarget != "" {
+		if secret.ObjectMeta.Labels == nil {
+			secret.ObjectMeta.Labels = map[string]string{}
+		}
+		secret.ObjectMeta.Labels[SyncerLabel] = site.ObjectMeta.Labels[SyncerLabel]
+		if secret.ObjectMeta.Annotations == nil {
+			secret.ObjectMeta.Annotations = map[string]string{}
+		}
+		secret.ObjectMeta.Annotations[SyncTargetAnnotation] = strings.Split(siteTarget, "/")[0] + "/" + targetName
+	}
+}
+
 func (s *NetworkSite) GenerateServerSecret() error {
 	if s.manager.ca == nil {
 		return nil
@@ -177,6 +192,10 @@ func (s *NetworkSite) GenerateServerSecret() error {
 	}
 	secret := certs.GenerateSecret(name, s.site.ObjectMeta.Name, strings.Join(hosts, ","), s.manager.ca)
 	secret.ObjectMeta.OwnerReferences = getOwnerReferencesForSite(s.site)
+	if s.manager.namespaceScoped {
+		secret.ObjectMeta.Name = s.site.ObjectMeta.Name
+		setSyncerLabelAndAnnotation(s.site, &secret, "skupper-site-server")
+	}
 	err := s.ensureSecret(&secret)
 	if err != nil {
 		return err
@@ -187,6 +206,9 @@ func (s *NetworkSite) GenerateServerSecret() error {
 
 func (s *NetworkSite) linkTo(site *NetworkSite) error {
 	token := site.generateLinkToken()
+	if s.manager.namespaceScoped {
+		setSyncerLabelAndAnnotation(s.site, token, token.ObjectMeta.Name)
+	}
 	err := s.ensureSecret(token)
 	if err != nil {
 		return err

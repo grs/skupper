@@ -32,6 +32,7 @@ import (
 	"github.com/skupperproject/skupper/pkg/event"
 	skupperv1alpha1 "github.com/skupperproject/skupper/pkg/apis/skupper/v1alpha1"
 	skupperclient "github.com/skupperproject/skupper/pkg/generated/client/clientset/versioned"
+	skupperinterfaces "github.com/skupperproject/skupper/pkg/generated/client/informers/externalversions/internalinterfaces"
 	skupperv1alpha1informer "github.com/skupperproject/skupper/pkg/generated/client/informers/externalversions/skupper/v1alpha1"
 )
 
@@ -57,6 +58,12 @@ func ListByLabelSelector(selector string) internalinterfaces.TweakListOptionsFun
 	}
 }
 
+func skupperSelector(selector string) skupperinterfaces.TweakListOptionsFunc {
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = selector
+	}
+}
+
 type Controller struct {
 	eventKey string
 	errorKey string
@@ -75,11 +82,12 @@ func NewController(name string, client kubernetes.Interface, skupperClient skupp
 	}
 }
 
-func (c *Controller) NewWatchers(client kubernetes.Interface) Watchers {
+func (c *Controller) NewWatchers(client kubernetes.Interface, skupperClient skupperclient.Interface) Watchers {
 	return &Controller{
 		eventKey: c.eventKey,
 		errorKey: c.errorKey,
 		client: client,
+		skupperClient: skupperClient,
 		queue: c.queue,
 	}
 }
@@ -174,6 +182,12 @@ func (c *Controller) newEventHandler(handler ResourceChangeHandler) *cache.Resou
 type Watchers interface{
 	WatchConfigMaps(options internalinterfaces.TweakListOptionsFunc, namespace string, handler ConfigMapHandler) *ConfigMapWatcher
 	WatchSecrets(options internalinterfaces.TweakListOptionsFunc, namespace string, handler SecretHandler) *SecretWatcher
+	WatchSites(namespace string, handler SiteHandler) *SiteWatcher
+	WatchSitesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler SiteHandler) *SiteWatcher
+	WatchRequiredServices(namespace string, handler RequiredServiceHandler) *RequiredServiceWatcher
+	WatchRequiredServicesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler RequiredServiceHandler) *RequiredServiceWatcher
+	WatchProvidedServices(namespace string, handler ProvidedServiceHandler) *ProvidedServiceWatcher
+	WatchProvidedServicesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler ProvidedServiceHandler) *ProvidedServiceWatcher
 }
 
 func (c *Controller) WatchConfigMaps(options internalinterfaces.TweakListOptionsFunc, namespace string, handler ConfigMapHandler) *ConfigMapWatcher {
@@ -454,6 +468,22 @@ func (c *Controller) WatchSites(namespace string, handler SiteHandler) *SiteWatc
 	return watcher
 }
 
+func (c *Controller) WatchSitesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler SiteHandler) *SiteWatcher {
+	watcher := &SiteWatcher{
+		handler:   handler,
+		informer:  skupperv1alpha1informer.NewFilteredSiteInformer(
+			c.skupperClient,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			options),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
 type SiteHandler func(string, *skupperv1alpha1.Site) error
 
 type SiteWatcher struct {
@@ -517,6 +547,22 @@ func (c *Controller) WatchRequiredServices(namespace string, handler RequiredSer
 	return watcher
 }
 
+func (c *Controller) WatchRequiredServicesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler RequiredServiceHandler) *RequiredServiceWatcher {
+	watcher := &RequiredServiceWatcher{
+		handler:   handler,
+		informer:  skupperv1alpha1informer.NewFilteredRequiredServiceInformer(
+			c.skupperClient,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			options),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
 type RequiredServiceHandler func(string, *skupperv1alpha1.RequiredService) error
 
 type RequiredServiceWatcher struct {
@@ -573,6 +619,22 @@ func (c *Controller) WatchProvidedServices(namespace string, handler ProvidedSer
 			namespace,
 			time.Second*30,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
+func (c *Controller) WatchProvidedServicesWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler ProvidedServiceHandler) *ProvidedServiceWatcher {
+	watcher := &ProvidedServiceWatcher{
+		handler:   handler,
+		informer:  skupperv1alpha1informer.NewFilteredProvidedServiceInformer(
+			c.skupperClient,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			options),
 		namespace: namespace,
 	}
 

@@ -19,20 +19,22 @@ import (
 )
 
 type NetworkController struct {
-	kubeClient           kubernetes.Interface
-	skupperClient        skupperclient.Interface
-	controller           *kube.Controller
-	stopCh               <-chan struct{}
-	siteWatcher          *kube.SiteWatcher
-	serverSecretWatcher  *kube.SecretWatcher
+	kubeClient            kubernetes.Interface
+	skupperClient         skupperclient.Interface
+	controller            *kube.Controller
+	stopCh                <-chan struct{}
+	siteWatcher           *kube.SiteWatcher
+	serverSecretWatcher   *kube.SecretWatcher
 	ingressBindingWatcher *kube.RequiredServiceWatcher
 	egressBindingWatcher  *kube.ProvidedServiceWatcher
-	networkManager       *kube.NetworkManager
+	networkManagers       map[string]*kube.NetworkManager
+	scope                 string
 }
 
 func NewNetworkController() (*NetworkController, error) {
 	namespace := os.Getenv("NAMESPACE")
 	kubeconfig := os.Getenv("KUBECONFIG")
+	scope := os.Getenv("NETWORK_SCOPE")
 	// todo, get context from env?
 	cli, err := client.NewClient(namespace, "", kubeconfig)
 	if err != nil {
@@ -48,6 +50,7 @@ func NewNetworkController() (*NetworkController, error) {
 	// Startup message
 	if os.Getenv("WATCH_NAMESPACE") != "" {
 		watchNamespace = os.Getenv("WATCH_NAMESPACE")
+		scope = "namespace"
 		log.Println("Skupper network controller watching current namespace ", watchNamespace)
 	} else {
 		watchNamespace = metav1.NamespaceAll
@@ -59,14 +62,46 @@ func NewNetworkController() (*NetworkController, error) {
 		kubeClient:           cli.KubeClient,
 		skupperClient:        skupperCli,
 		controller:           kube.NewController("NetworkController", cli.KubeClient, skupperCli),
+		scope:                scope,
+		networkManagers:      map[string]*kube.NetworkManager{},
 	}
 	controller.siteWatcher = controller.controller.WatchSites(watchNamespace, controller.siteEvent)
 	controller.serverSecretWatcher = controller.controller.WatchSecrets(kube.ListByName("skupper-site-server"), watchNamespace, controller.checkServerSecret)
 	controller.ingressBindingWatcher = controller.controller.WatchRequiredServices(watchNamespace, controller.ingressBindingEvent)
 	controller.egressBindingWatcher = controller.controller.WatchProvidedServices(watchNamespace, controller.egressBindingEvent)
-	controller.networkManager = kube.NewNetworkManager(controller.kubeClient, controller.skupperClient, "skupper-network-ca", "skupper-network-controller")
 
 	return controller, nil
+}
+
+func (c *NetworkController) getNetworkManager(key string) (*kube.NetworkManager, error) {
+	var namespace string
+	if c.isNamespaceScoped() {
+		var err error
+		namespace, _, err = cache.SplitMetaNamespaceKey(key)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		namespace = "skupper-network-controller"
+	}
+	if networkmanager, ok := c.networkManagers[namespace]; ok {
+		return networkmanager, nil
+	}
+	return c.newNetworkManager(namespace)
+}
+
+func (c *NetworkController) newNetworkManager(namespace string) (*kube.NetworkManager, error) {
+	networkManager := kube.NewNetworkManager(c.kubeClient, c.skupperClient, "skupper-network-ca", namespace, c.isNamespaceScoped())
+	err := networkManager.ReadOrGenerateCA()
+	if err != nil {
+		return nil, err
+	}
+	c.networkManagers[namespace] = networkManager
+	return networkManager, err
+}
+
+func (c *NetworkController) isNamespaceScoped() bool {
+	return c.scope == "namespace"
 }
 
 func (c *NetworkController) Run(stopCh <-chan struct{}) error {
@@ -77,10 +112,6 @@ func (c *NetworkController) Run(stopCh <-chan struct{}) error {
 	c.ingressBindingWatcher.Start(stopCh)
 	c.egressBindingWatcher.Start(stopCh)
 	c.stopCh = stopCh
-	err := c.networkManager.ReadOrGenerateCA()
-	if err != nil {
-		return err
-	}
 
 	log.Println("Waiting for informer caches to sync")
 	if ok := c.siteWatcher.Sync(stopCh); !ok {
@@ -106,14 +137,18 @@ func (c *NetworkController) siteEvent(key string, site *skupperv1alpha1.Site) er
 	if site == nil {
 		return nil
 	}
-	ns := c.networkManager.GetSite(key, site)
+	networkManager, err := c.getNetworkManager(key)
+	if err != nil {
+		return err
+	}
+	ns := networkManager.GetSite(key, site)
 	if !ns.HasServerSecret() {
 		err := ns.GenerateServerSecret()
 		if err != nil {
 			return err
 		}
 	}
-	err := c.networkManager.Link(ns)
+	err = networkManager.Link(ns)
 	if err != nil {
 		return err
 	}

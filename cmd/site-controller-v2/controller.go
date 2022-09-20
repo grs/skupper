@@ -126,6 +126,9 @@ func (c *SiteController) checkSite(key string, site *skupperv1alpha1.Site) error
 	if site == nil {
 		return nil
 	}
+	if kube.HasSyncTarget(&site.ObjectMeta) {
+		return nil
+	}
 	namespace, _, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		log.Printf("Error resolving namespace for %q: ", key, err)
@@ -196,6 +199,9 @@ func (c *SiteController) checkProvidedService(key string, binding *skupperv1alph
 }
 
 func (c *SiteController) checkServerSecret(key string, secret *corev1.Secret) error {
+	if secret != nil && kube.HasSyncTarget(&secret.ObjectMeta) {
+		return nil
+	}
 	log.Printf("Checking server secret for %s", key)
 	namespace, _, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -213,6 +219,9 @@ func (c *SiteController) checkServerSecret(key string, secret *corev1.Secret) er
 }
 
 func (c *SiteController) checkLink(key string, secret *corev1.Secret) error {
+	if secret != nil && kube.HasSyncTarget(&secret.ObjectMeta) {
+		return nil
+	}
 	log.Printf("Handling link request for %s", key)
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
