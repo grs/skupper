@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/skupperproject/skupper/api/types"
@@ -48,10 +49,33 @@ type IngressBinding struct {
 	listeners   map[string]qdr.TcpEndpoint
 }
 
+type IngressMode string
+
+const (
+	IngressModeLoadBalancer IngressMode = "loadbalancer"
+	IngressModeNginxIngress IngressMode = "nginx-ingress-v1"
+)
+
+func GetIngressModeFromString(s string) IngressMode {
+	if s == string(IngressModeLoadBalancer) {
+		return IngressModeLoadBalancer
+	}
+	if s == string(IngressModeNginxIngress) {
+		return IngressModeNginxIngress
+	}
+	return ""
+}
+
+type DefaultSiteOptions struct {
+	IngressMode       IngressMode
+	IngressHostSuffix string
+}
+
 type SiteManager struct {
 	site             *skupperv1alpha1.Site
 	client           kubernetes.Interface
 	skupperClient    skupperclient.Interface
+	dynamicClient    dynamic.Interface
 	pendingLinks     map[string]*corev1.Secret
 	ingressBindings  map[string]*IngressBinding
 	egressBindings   map[string]*EgressBinding
@@ -59,6 +83,7 @@ type SiteManager struct {
 	freePorts        *qdr.FreePorts
 	portMappings     map[string]int
 	haveServerSecret bool
+	defaultOptions   DefaultSiteOptions
 }
 
 func newIngressBinding(binding *skupperv1alpha1.RequiredService) *IngressBinding {
@@ -76,16 +101,21 @@ func newEgressBinding(binding *skupperv1alpha1.ProvidedService) *EgressBinding {
 	}
 }
 
-func NewSiteManager(client kubernetes.Interface, skupperClient skupperclient.Interface) *SiteManager {
-	return &SiteManager{
+func NewSiteManager(client kubernetes.Interface, skupperClient skupperclient.Interface, dynamicClient dynamic.Interface, options *DefaultSiteOptions) *SiteManager {
+	siteMgr := &SiteManager{
 		client: client,
 		skupperClient: skupperClient,
+		dynamicClient: dynamicClient,
 		pendingLinks: map[string]*corev1.Secret{},
 		freePorts:    qdr.NewFreePorts(),
 		portMappings: map[string]int{},
 		ingressBindings: map[string]*IngressBinding{},
 		egressBindings: map[string]*EgressBinding{},
 	}
+	if options != nil {
+		siteMgr.defaultOptions = *options
+	}
+	return siteMgr
 }
 
 func (m *SiteManager) Reconcile(site *skupperv1alpha1.Site) (bool, error) {
@@ -477,11 +507,6 @@ func (m *SiteManager) checkRouterServiceAccount() error {
 func (m *SiteManager) checkRouterService() error {
 	//TODO: populate from CR
 	var annotations map[string]string
-	svcType := corev1.ServiceTypeLoadBalancer
-	loadBalancerIP := ""
-	selector := map[string]string{
-		types.ComponentAnnotation: types.TransportComponentName,
-	}
 
 	svc := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
@@ -494,7 +519,9 @@ func (m *SiteManager) checkRouterService() error {
 			OwnerReferences: m.getOwnerReferences(),
 		},
 		Spec: corev1.ServiceSpec{
-			Selector:       selector,
+			Selector:       map[string]string{
+				types.ComponentAnnotation: types.TransportComponentName,
+			},
 			Ports:          []corev1.ServicePort{
 				{
 					Name:       "inter-router",
@@ -509,20 +536,27 @@ func (m *SiteManager) checkRouterService() error {
 					TargetPort: intstr.FromInt(int(types.EdgeListenerPort)),
 				},
 			},
-			Type:           svcType,
-			LoadBalancerIP: loadBalancerIP,
 		},
 	}
-
+	if m.defaultOptions.IngressMode == IngressModeLoadBalancer {
+		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
+		//TODO: populate svc.Spec.LoadBalancerIP if indicated in CRD
+	}
 	return m.ensureService(svc)
 }
 
 func (m *SiteManager) checkRouterIngress() error {
+	if m.defaultOptions.IngressMode == IngressModeNginxIngress {
+		return m.ensureNginxIngress()
+	}
 	return nil
 }
 
 func (m *SiteManager) resolveRouterAddresses() ([]skupperv1alpha1.Address, error) {
 	//TODO: support for other site ingress options
+	if m.defaultOptions.IngressMode == IngressModeNginxIngress {
+		return m.resolveNginxIngress()
+	}
 	return m.resolveLoadBalancer()
 }
 
@@ -548,6 +582,53 @@ func (m *SiteManager) resolveLoadBalancer() ([]skupperv1alpha1.Address, error) {
 		Port: strconv.Itoa(int(types.EdgeListenerPort)),
 	})
 	return addresses, nil
+}
+
+func (m *SiteManager) resolveNginxIngress() ([]skupperv1alpha1.Address, error) {
+	namespace := m.site.ObjectMeta.Namespace
+
+	routes, err := getIngressRoutesV1(m.dynamicClient, namespace, types.IngressName)
+	if err != nil {
+		return nil, err
+	}
+	var addresses []skupperv1alpha1.Address
+	for _, route := range routes {
+		if m.defaultOptions.IngressHostSuffix == "" && len(strings.Split(route.Host, ".")) == 1 {
+			return nil, nil
+		}
+		addresses = append(addresses, skupperv1alpha1.Address {
+			Name: strings.Split(route.Host, ".")[0],
+			Host: route.Host,
+			Port: "443",
+		})
+	}
+	return addresses, nil
+}
+
+func (m *SiteManager) qualifiedIngressHost(host string) string {
+	if m.defaultOptions.IngressHostSuffix != "" {
+		return strings.Join([]string{host, m.site.ObjectMeta.Namespace, m.defaultOptions.IngressHostSuffix}, ".")
+	}
+	return host
+}
+
+func (m *SiteManager) ensureNginxIngress() error {
+	namespace := m.site.ObjectMeta.Namespace
+	routes := []IngressRoute {
+		{
+			Host:        m.qualifiedIngressHost("inter-router"),
+			ServiceName: types.TransportServiceName,
+			ServicePort: int(types.InterRouterListenerPort),
+		},
+		{
+			Host:        m.qualifiedIngressHost("edge"),
+			ServiceName: types.TransportServiceName,
+			ServicePort: int(types.EdgeListenerPort),
+		},
+	}
+	annotations := map[string]string{}
+	addNginxIngressAnnotations(true, annotations)
+	return ensureIngressRoutesV1(m.dynamicClient, namespace, "skupper", routes, annotations, m.getOwnerReferences(), m.defaultOptions.IngressHostSuffix == "")
 }
 
 func (m *SiteManager) ensureRole(desired *rbacv1.Role) error {

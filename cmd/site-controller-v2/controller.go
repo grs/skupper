@@ -32,6 +32,7 @@ type SiteController struct {
 	tokenWatcher          *kube.SecretWatcher
 	serverSecretWatcher   *kube.SecretWatcher
 	sites                 map[string]*kube.SiteManager
+	defaultSiteOptions    kube.DefaultSiteOptions
 }
 
 func NewSiteController() (*SiteController, error) {
@@ -70,6 +71,9 @@ func NewSiteController() (*SiteController, error) {
 	controller.egressBindingWatcher = controller.controller.WatchProvidedServices(watchNamespace, controller.checkProvidedService)
 	controller.tokenWatcher = controller.controller.WatchSecrets(kube.ListByLabelSelector(types.TypeTokenQualifier), watchNamespace, controller.checkLink)
 	controller.serverSecretWatcher = controller.controller.WatchSecrets(kube.ListByName("skupper-site-server"), watchNamespace, controller.checkServerSecret)
+
+	controller.defaultSiteOptions.IngressMode = kube.GetIngressModeFromString(os.Getenv("SKUPPER_DEFAULT_INGRESS_MODE"))
+	controller.defaultSiteOptions.IngressHostSuffix = os.Getenv("SKUPPER_DEFAULT_INGRESS_HOST_SUFFIX")
 
 	return controller, nil
 }
@@ -113,7 +117,7 @@ func (c *SiteController) siteMgr(namespace string) *kube.SiteManager {
 	if mgr, ok := c.sites[namespace]; ok {
 		return mgr
 	}
-	mgr := kube.NewSiteManager(c.vanClient.KubeClient, c.skupperClient)
+	mgr := kube.NewSiteManager(c.vanClient.KubeClient, c.skupperClient, c.vanClient.DynamicClient, &c.defaultSiteOptions)
 	c.sites[namespace] = mgr
 	return mgr
 }
