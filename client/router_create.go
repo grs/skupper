@@ -1461,7 +1461,7 @@ func (cli *VanClient) createIngress(site types.SiteConfig) error {
 		})
 	}
 
-	return kube.CreateIngress(types.IngressName, routes, site.Spec.IsIngressNginxIngress(), true, asOwnerReference(site.Reference), namespace, site.Spec.IngressAnnotations, cli.KubeClient)
+	return kube.CreateIngress(types.IngressName, routes, site.Spec.IsIngressNginxIngress(), true, asOwnerReferences(site.Reference), namespace, site.Spec.IngressAnnotations, cli.KubeClient)
 }
 
 func (cli *VanClient) createContourProxies(site types.SiteConfig) error {
@@ -1523,4 +1523,12 @@ func asOwnerReference(ref types.SiteConfigReference) *metav1.OwnerReference {
 		owner.APIVersion = "v1"
 	}
 	return &owner
+}
+
+func asOwnerReferences(in types.SiteConfigReference) []metav1.OwnerReference {
+	ref := asOwnerReference(in)
+	if ref == nil {
+		return nil
+	}
+	return []metav1.OwnerReference{*ref}
 }
