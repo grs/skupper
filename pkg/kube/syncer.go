@@ -316,6 +316,12 @@ func (s *SecretSync) CreateTarget(targetKey string, src interface{}) error {
 		Type: source.Type,
 	}
 	delete(target.ObjectMeta.Annotations, SyncTargetAnnotation)
+	if targetSite, ok := source.ObjectMeta.Annotations[TargetSiteAnnotation]; ok {
+		site, _ := s.target.siteWatcher.Get(targetSite)
+		if site != nil {
+			target.ObjectMeta.OwnerReferences = getOwnerReferencesForSite(site)
+		}
+	}
 
 	_, err = s.target.client.KubeClient.CoreV1().Secrets(namespace).Create(target)
 	return err
@@ -352,6 +358,7 @@ func (s *SecretSync) GetTarget(targetKey string) (interface{}, error) {
 const (
 	SyncerLabel string = "skupper.io/syncer"
 	SyncTargetAnnotation string = "skupper.io/sync-target"
+	TargetSiteAnnotation string = "skupper.io/target-site"
 )
 
 func (s *TargetHandler) targetDeleted(targetKey string, syncType SyncType) error {

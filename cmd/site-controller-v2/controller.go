@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
+	routev1client "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
+
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/event"
@@ -24,6 +26,7 @@ import (
 type SiteController struct {
 	vanClient             *client.VanClient
 	skupperClient         skupperclient.Interface
+	routeClient           *routev1client.RouteV1Client
 	controller            *kube.Controller
 	stopCh                <-chan struct{}
 	siteWatcher           *kube.SiteWatcher
@@ -117,7 +120,7 @@ func (c *SiteController) siteMgr(namespace string) *kube.SiteManager {
 	if mgr, ok := c.sites[namespace]; ok {
 		return mgr
 	}
-	mgr := kube.NewSiteManager(c.vanClient.KubeClient, c.skupperClient, c.vanClient.DynamicClient, &c.defaultSiteOptions)
+	mgr := kube.NewSiteManager(c.vanClient.KubeClient, c.skupperClient, c.vanClient.RouteClient, c.vanClient.DynamicClient, &c.defaultSiteOptions)
 	c.sites[namespace] = mgr
 	return mgr
 }

@@ -30,6 +30,9 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	routev1 "github.com/openshift/api/route/v1"
+	routev1client "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
+
 	"github.com/skupperproject/skupper/api/types"
 	skupperv1alpha1 "github.com/skupperproject/skupper/pkg/apis/skupper/v1alpha1"
 	skupperclient "github.com/skupperproject/skupper/pkg/generated/client/clientset/versioned"
@@ -54,6 +57,7 @@ type IngressMode string
 const (
 	IngressModeLoadBalancer IngressMode = "loadbalancer"
 	IngressModeNginxIngress IngressMode = "nginx-ingress-v1"
+	IngressModeRoute        IngressMode = "route"
 )
 
 func GetIngressModeFromString(s string) IngressMode {
@@ -62,6 +66,9 @@ func GetIngressModeFromString(s string) IngressMode {
 	}
 	if s == string(IngressModeNginxIngress) {
 		return IngressModeNginxIngress
+	}
+	if s == string(IngressModeRoute) {
+		return IngressModeRoute
 	}
 	return ""
 }
@@ -75,6 +82,7 @@ type SiteManager struct {
 	site             *skupperv1alpha1.Site
 	client           kubernetes.Interface
 	skupperClient    skupperclient.Interface
+	routeClient      *routev1client.RouteV1Client
 	dynamicClient    dynamic.Interface
 	pendingLinks     map[string]*corev1.Secret
 	ingressBindings  map[string]*IngressBinding
@@ -84,6 +92,7 @@ type SiteManager struct {
 	portMappings     map[string]int
 	haveServerSecret bool
 	defaultOptions   DefaultSiteOptions
+	ingressMode      IngressMode
 }
 
 func newIngressBinding(binding *skupperv1alpha1.RequiredService) *IngressBinding {
@@ -101,21 +110,33 @@ func newEgressBinding(binding *skupperv1alpha1.ProvidedService) *EgressBinding {
 	}
 }
 
-func NewSiteManager(client kubernetes.Interface, skupperClient skupperclient.Interface, dynamicClient dynamic.Interface, options *DefaultSiteOptions) *SiteManager {
+func NewSiteManager(client kubernetes.Interface, skupperClient skupperclient.Interface, routeClient *routev1client.RouteV1Client, dynamicClient dynamic.Interface, options *DefaultSiteOptions) *SiteManager {
 	siteMgr := &SiteManager{
-		client: client,
-		skupperClient: skupperClient,
-		dynamicClient: dynamicClient,
-		pendingLinks: map[string]*corev1.Secret{},
-		freePorts:    qdr.NewFreePorts(),
-		portMappings: map[string]int{},
+		client:          client,
+		skupperClient:   skupperClient,
+		routeClient:     routeClient,
+		dynamicClient:   dynamicClient,
+		pendingLinks:    map[string]*corev1.Secret{},
+		freePorts:       qdr.NewFreePorts(),
+		portMappings:    map[string]int{},
 		ingressBindings: map[string]*IngressBinding{},
-		egressBindings: map[string]*EgressBinding{},
+		egressBindings:  map[string]*EgressBinding{},
 	}
 	if options != nil {
 		siteMgr.defaultOptions = *options
 	}
+	siteMgr.ingressMode = siteMgr.getIngressMode()
 	return siteMgr
+}
+
+func (m *SiteManager) getIngressMode() IngressMode {
+	if m.defaultOptions.IngressMode == IngressModeNginxIngress {
+		return IngressModeNginxIngress
+	}
+	if m.routeClient != nil && (m.defaultOptions.IngressMode == IngressModeRoute || m.defaultOptions.IngressMode == "")  {
+		return IngressModeRoute
+	}
+	return IngressModeLoadBalancer
 }
 
 func (m *SiteManager) Reconcile(site *skupperv1alpha1.Site) (bool, error) {
@@ -538,7 +559,7 @@ func (m *SiteManager) checkRouterService() error {
 			},
 		},
 	}
-	if m.defaultOptions.IngressMode == IngressModeLoadBalancer {
+	if m.ingressMode == IngressModeLoadBalancer {
 		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
 		//TODO: populate svc.Spec.LoadBalancerIP if indicated in CRD
 	}
@@ -546,16 +567,22 @@ func (m *SiteManager) checkRouterService() error {
 }
 
 func (m *SiteManager) checkRouterIngress() error {
-	if m.defaultOptions.IngressMode == IngressModeNginxIngress {
+	if m.ingressMode == IngressModeNginxIngress {
 		return m.ensureNginxIngress()
+	}
+	if m.ingressMode == IngressModeRoute {
+		return m.ensureRoutes()
 	}
 	return nil
 }
 
 func (m *SiteManager) resolveRouterAddresses() ([]skupperv1alpha1.Address, error) {
 	//TODO: support for other site ingress options
-	if m.defaultOptions.IngressMode == IngressModeNginxIngress {
+	if m.ingressMode == IngressModeNginxIngress {
 		return m.resolveNginxIngress()
+	}
+	if m.ingressMode == IngressModeRoute {
+		return m.resolveRoute()
 	}
 	return m.resolveLoadBalancer()
 }
@@ -605,6 +632,30 @@ func (m *SiteManager) resolveNginxIngress() ([]skupperv1alpha1.Address, error) {
 	return addresses, nil
 }
 
+func (m *SiteManager) resolveRoute() ([]skupperv1alpha1.Address, error) {
+	namespace := m.site.ObjectMeta.Namespace
+	interRouterRoute, err := m.routeClient.Routes(namespace).Get("skupper-inter-router", metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	edgeRoute, err := m.routeClient.Routes(namespace).Get("skupper-edge", metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var addresses []skupperv1alpha1.Address
+	addresses = append(addresses, skupperv1alpha1.Address {
+		Name: "inter-router",
+		Host: interRouterRoute.Spec.Host,
+		Port: "443",
+	})
+	addresses = append(addresses, skupperv1alpha1.Address {
+		Name: "edge",
+		Host: edgeRoute.Spec.Host,
+		Port: "443",
+	})
+	return addresses, nil
+}
+
 func (m *SiteManager) qualifiedIngressHost(host string) string {
 	if m.defaultOptions.IngressHostSuffix != "" {
 		return strings.Join([]string{host, m.site.ObjectMeta.Namespace, m.defaultOptions.IngressHostSuffix}, ".")
@@ -629,6 +680,92 @@ func (m *SiteManager) ensureNginxIngress() error {
 	annotations := map[string]string{}
 	addNginxIngressAnnotations(true, annotations)
 	return ensureIngressRoutesV1(m.dynamicClient, namespace, "skupper", routes, annotations, m.getOwnerReferences(), m.defaultOptions.IngressHostSuffix == "")
+}
+
+func (m *SiteManager) ensureRoutes() error {
+	hostInterRouter := ""
+	hostEdge := ""
+	host := m.defaultOptions.IngressHostSuffix
+	if host != "" {
+		namespace := m.site.ObjectMeta.Namespace
+		hostInterRouter = types.InterRouterRouteName + "-" + namespace + "." + host
+		hostEdge = types.EdgeRouteName + "-" + namespace + "." + host
+	}
+
+	err := m.ensureRoute(&routev1.Route{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Route",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: types.InterRouterRouteName,
+		},
+		Spec: routev1.RouteSpec{
+			Path: "",
+			Host: hostInterRouter,
+			Port: &routev1.RoutePort{
+				TargetPort: intstr.FromString(types.InterRouterRole),
+			},
+			To: routev1.RouteTargetReference{
+				Kind: "Service",
+				Name: types.TransportServiceName,
+			},
+			TLS: &routev1.TLSConfig{
+				Termination:                   routev1.TLSTerminationPassthrough,
+				InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyNone,
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	err = m.ensureRoute(&routev1.Route{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Route",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: types.EdgeRouteName,
+		},
+		Spec: routev1.RouteSpec{
+			Path: "",
+			Host: hostEdge,
+			Port: &routev1.RoutePort{
+				TargetPort: intstr.FromString(types.EdgeRole),
+			},
+			To: routev1.RouteTargetReference{
+				Kind: "Service",
+				Name: types.TransportServiceName,
+			},
+			TLS: &routev1.TLSConfig{
+				Termination:                   routev1.TLSTerminationPassthrough,
+				InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyNone,
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *SiteManager) ensureRoute(route *routev1.Route) error {
+	namespace := m.site.ObjectMeta.Namespace
+	route.ObjectMeta.OwnerReferences = m.getOwnerReferences()
+
+	current, err := m.routeClient.Routes(namespace).Get(route.Name, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err := m.routeClient.Routes(namespace).Create(route)
+		return err
+	} else if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(current.Spec, route.Spec) {
+		current.Spec = route.Spec
+		_, err = m.routeClient.Routes(namespace).Update(current)
+		return err
+	}
+	return nil
 }
 
 func (m *SiteManager) ensureRole(desired *rbacv1.Role) error {

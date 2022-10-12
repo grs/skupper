@@ -1753,6 +1753,56 @@ the .bash_profile. i.e.: $ source <(skupper completion)
 	return cmd
 }
 
+func NewCmdSyncer() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "syncer generate-push-secret <serviceaccount> or syncer generate-pull-secret <serviceaccount> ",
+		Short: "generate secrets for use with skupper syncer",
+	}
+	return cmd
+}
+
+var syncerServiceAccountName string
+
+func NewCmdGeneratePullSecret() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "generate-pull-secret <syncer-name>",
+		Short:  "Generate a pull-secret for use with the skupper syncer",
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewClient(namespace, kubeContext, kubeConfigPath)
+			secret, err := client.GenerateSyncerPullSecret(args[0], syncerServiceAccountName)
+			if err != nil {
+				return fmt.Errorf("%w", err)
+			}
+			fmt.Print(secret)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&syncerServiceAccountName, "service-account", "skupper-syncer", "The name of the serviceaccount whose token should be included in the generated secret")
+
+	return cmd
+}
+
+func NewCmdGeneratePushSecret() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "generate-push-secret <syncer-name>",
+		Short:  "Generate a push-secret for use with the skupper syncer",
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewClient(namespace, kubeContext, kubeConfigPath)
+			secret, err := client.GenerateSyncerPushSecret(args[0], syncerServiceAccountName)
+			if err != nil {
+				return fmt.Errorf("%w", err)
+			}
+			fmt.Print(secret)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&syncerServiceAccountName, "service-account", "skupper-syncer", "The name of the serviceaccount whose token should be included in the generated secret")
+
+	return cmd
+}
+
 type cobraFunc func(cmd *cobra.Command, args []string)
 
 func newClient(cmd *cobra.Command, args []string) {
@@ -1881,6 +1931,10 @@ func init() {
 	cmdNetwork := NewCmdNetwork()
 	cmdNetwork.AddCommand(NewCmdNetworkStatus(newClient))
 
+	cmdSyncer := NewCmdSyncer()
+	cmdSyncer.AddCommand(NewCmdGeneratePullSecret())
+	cmdSyncer.AddCommand(NewCmdGeneratePushSecret())
+
 	rootCmd = &cobra.Command{Use: "skupper"}
 	rootCmd.AddCommand(cmdInit,
 		cmdDelete,
@@ -1904,7 +1958,8 @@ func init() {
 		cmdCompletion,
 		cmdGateway,
 		cmdRevokeAll,
-		cmdNetwork)
+		cmdNetwork,
+		cmdSyncer)
 
 	rootCmd.PersistentFlags().StringVarP(&kubeConfigPath, "kubeconfig", "", "", "Path to the kubeconfig file to use")
 	rootCmd.PersistentFlags().StringVarP(&kubeContext, "context", "c", "", "The kubeconfig context to use")

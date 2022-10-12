@@ -177,6 +177,7 @@ func setSyncerLabelAndAnnotation(site *skupperv1alpha1.Site, secret *corev1.Secr
 			secret.ObjectMeta.Annotations = map[string]string{}
 		}
 		secret.ObjectMeta.Annotations[SyncTargetAnnotation] = strings.Split(siteTarget, "/")[0] + "/" + targetName
+		secret.ObjectMeta.Annotations[TargetSiteAnnotation] = siteTarget
 	}
 }
 
