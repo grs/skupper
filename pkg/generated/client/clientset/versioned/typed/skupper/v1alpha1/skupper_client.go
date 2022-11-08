@@ -28,6 +28,7 @@ type SkupperV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	ProvidedServicesGetter
 	RequiredServicesGetter
+	ServiceGroupsGetter
 	SitesGetter
 	SkupperClusterPoliciesGetter
 }
@@ -43,6 +44,10 @@ func (c *SkupperV1alpha1Client) ProvidedServices(namespace string) ProvidedServi
 
 func (c *SkupperV1alpha1Client) RequiredServices(namespace string) RequiredServiceInterface {
 	return newRequiredServices(c, namespace)
+}
+
+func (c *SkupperV1alpha1Client) ServiceGroups(namespace string) ServiceGroupInterface {
+	return newServiceGroups(c, namespace)
 }
 
 func (c *SkupperV1alpha1Client) Sites(namespace string) SiteInterface {

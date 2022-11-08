@@ -36,6 +36,7 @@ import (
 	"github.com/skupperproject/skupper/api/types"
 	skupperv1alpha1 "github.com/skupperproject/skupper/pkg/apis/skupper/v1alpha1"
 	skupperclient "github.com/skupperproject/skupper/pkg/generated/client/clientset/versioned"
+	"github.com/skupperproject/skupper/pkg/images"
 	"github.com/skupperproject/skupper/pkg/qdr"
 	"github.com/skupperproject/skupper/pkg/version"
 )
@@ -58,6 +59,7 @@ const (
 	IngressModeLoadBalancer IngressMode = "loadbalancer"
 	IngressModeNginxIngress IngressMode = "nginx-ingress-v1"
 	IngressModeRoute        IngressMode = "route"
+	IngressModeNone         IngressMode = "none"
 )
 
 func GetIngressModeFromString(s string) IngressMode {
@@ -69,6 +71,9 @@ func GetIngressModeFromString(s string) IngressMode {
 	}
 	if s == string(IngressModeRoute) {
 		return IngressModeRoute
+	}
+	if s == string(IngressModeNone) {
+		return IngressModeNone
 	}
 	return ""
 }
@@ -373,9 +378,9 @@ func (m *SiteManager) checkRouterDeployment(force bool) error {
 	serviceAccountName := "skupper-router"
 	isEdge := false
 	debugMode := ""
-	routerImageName := "quay.io/skupper/skupper-router:main"
+	routerImageName := images.GetRouterImageName()
+	configSyncImageName := images.GetConfigSyncImageName()
 	routerImagePullPolicy := corev1.PullAlways
-	configSyncImageName := "quay.io/skupper/config-sync:master"
 	configSyncImagePullPolicy := corev1.PullAlways
 	var annotations map[string]string
 
@@ -468,6 +473,22 @@ func (m *SiteManager) checkRouterDeployment(force bool) error {
 	return nil
 }
 
+func getTransportPolicyRules() []rbacv1.PolicyRule {
+	rules := types.TransportPolicyRule
+	rules = append(rules, rbacv1.PolicyRule{
+		Verbs:     []string{"get", "list", "watch"},
+		APIGroups: []string{"skupper.io"},
+		Resources: []string{"requiredservices", "providedservices", "sites"},
+	})
+	rules = append(rules, rbacv1.PolicyRule{
+		Verbs:     []string{"create", "delete", "update"},
+		APIGroups: []string{"skupper.io"},
+		Resources: []string{"requiredservices"},
+	})
+	return rules
+}
+
+
 func (m *SiteManager) checkRouterServiceAccount() error {
 	name := "skupper-router"
 
@@ -480,7 +501,7 @@ func (m *SiteManager) checkRouterServiceAccount() error {
 			Name: name,
 			OwnerReferences: m.getOwnerReferences(),
 		},
-		Rules: types.TransportPolicyRule,
+		Rules: getTransportPolicyRules(),
 	}
 	serviceAccount := &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{

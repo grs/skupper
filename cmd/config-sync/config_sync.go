@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/skupperproject/skupper/api/types"
 	"github.com/skupperproject/skupper/client"
+	"github.com/skupperproject/skupper/pkg/event"
 	"github.com/skupperproject/skupper/pkg/kube"
 	"io/ioutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,16 +20,19 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/skupperproject/skupper/pkg/kube/advertiser"
+	skupperclient "github.com/skupperproject/skupper/pkg/generated/client/clientset/versioned"
 	"github.com/skupperproject/skupper/pkg/qdr"
 )
 
 // Syncs the live router config with the configmap (bridge configuration,
 //secrets for services with TLS enabled, and secrets and connectors for links)
 type ConfigSync struct {
-	informer  cache.SharedIndexInformer
-	events    workqueue.RateLimitingInterface
-	agentPool *qdr.AgentPool
-	vanClient *client.VanClient
+	informer      cache.SharedIndexInformer
+	events        workqueue.RateLimitingInterface
+	agentPool     *qdr.AgentPool
+	vanClient     *client.VanClient
+	svcAdvertiser *advertiser.ServiceAdvertiser
 }
 
 type CopyCerts func(string, string, string) error
@@ -73,12 +77,28 @@ func newConfigSync(configInformer cache.SharedIndexInformer, cli *client.VanClie
 }
 
 func (c *ConfigSync) start(stopCh <-chan struct{}) error {
+	event.StartDefaultEventStore(stopCh)
+	skupperCli, err := skupperclient.NewForConfig(c.vanClient.RestConfig)
+	if err != nil {
+		return err
+	}
+	siteId, err := c.getSiteId()
+	if err != nil {
+		return err
+	}
+	c.svcAdvertiser = advertiser.NewServiceAdvertiser(c.vanClient.KubeClient, skupperCli, c.vanClient.Namespace, c.agentPool.ConnectionFactory(), siteId)
+	err = c.svcAdvertiser.Start()
+	if err != nil {
+		return err
+	}
+
 	go wait.Until(c.runConfigSync, time.Second, stopCh)
 
 	return nil
 }
 
 func (c *ConfigSync) stop() {
+	c.svcAdvertiser.Stop()
 	c.events.ShutDown()
 }
 
@@ -422,4 +442,28 @@ func (c *ConfigSync) copyCertsFilesToPath(path string, profilename string, secre
 	}
 
 	return nil
+}
+
+func (c *ConfigSync) getSiteId() (string, error) {
+	log.Println("Getting site id...")
+	agent, err := c.agentPool.Get()
+	if err != nil {
+		for {
+			log.Printf("failed to get agent: %s", err)
+			time.Sleep(time.Millisecond * 100)
+			agent, err = c.agentPool.Get()
+			if err == nil {
+				break
+			}
+		}
+	}
+
+	router, err := agent.GetLocalRouter()
+
+	c.agentPool.Put(agent)
+	if err != nil {
+		return "", err
+	}
+	log.Println("site id retrieved")
+	return router.Site.Id, nil
 }

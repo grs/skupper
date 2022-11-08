@@ -124,3 +124,19 @@ type ProvidedServiceSpec struct {
 	Address  string            `json:"address"`
 	Ports    []ServicePort     `json:"ports,omitempty"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ServiceGroup struct {
+	v1.TypeMeta   `json:",inline"`
+	v1.ObjectMeta `json:"metadata,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ServicegroupList contains a List of Servicegroup instances
+type ServiceGroupList struct {
+	v1.TypeMeta `json:",inline"`
+	v1.ListMeta `json:"metadata,omitempty"`
+	Items       []ServiceGroup `json:"items"`
+}

@@ -28,6 +28,8 @@ type Interface interface {
 	ProvidedServices() ProvidedServiceInformer
 	// RequiredServices returns a RequiredServiceInformer.
 	RequiredServices() RequiredServiceInformer
+	// ServiceGroups returns a ServiceGroupInformer.
+	ServiceGroups() ServiceGroupInformer
 	// Sites returns a SiteInformer.
 	Sites() SiteInformer
 	// SkupperClusterPolicies returns a SkupperClusterPolicyInformer.
@@ -53,6 +55,11 @@ func (v *version) ProvidedServices() ProvidedServiceInformer {
 // RequiredServices returns a RequiredServiceInformer.
 func (v *version) RequiredServices() RequiredServiceInformer {
 	return &requiredServiceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// ServiceGroups returns a ServiceGroupInformer.
+func (v *version) ServiceGroups() ServiceGroupInformer {
+	return &serviceGroupInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // Sites returns a SiteInformer.

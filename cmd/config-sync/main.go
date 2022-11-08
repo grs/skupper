@@ -48,7 +48,7 @@ func main() {
 	}
 
 	// Startup message
-	log.Printf("Config Sync")
+	log.Printf("Config Sync (with advertiser)")
 	log.Printf("Version: %s", version.Version)
 
 	// set up signals so we handle the first shutdown signal gracefully
@@ -64,6 +64,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Error getting van client: ", err.Error())
 	}
+
 	log.Printf("Creating informer...")
 	informer := corev1informer.NewFilteredConfigMapInformer(
 		cli.KubeClient,
@@ -80,7 +81,10 @@ func main() {
 	}
 	configSync := newConfigSync(informer, cli)
 	log.Println("Starting sync loop...")
-	configSync.start(stopCh)
+	err = configSync.start(stopCh)
+	if err != nil {
+		log.Fatal("Error starting config sync: ", err.Error())
+	}
 	<-stopCh
 	log.Println("Shutting down...")
 	configSync.stop()

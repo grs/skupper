@@ -27,6 +27,7 @@ type NetworkController struct {
 	serverSecretWatcher   *kube.SecretWatcher
 	ingressBindingWatcher *kube.RequiredServiceWatcher
 	egressBindingWatcher  *kube.ProvidedServiceWatcher
+	serviceGroupWatcher   *kube.ServiceGroupWatcher
 	networkManagers       map[string]*kube.NetworkManager
 	scope                 string
 }
@@ -69,6 +70,7 @@ func NewNetworkController() (*NetworkController, error) {
 	controller.serverSecretWatcher = controller.controller.WatchSecrets(kube.ListByName("skupper-site-server"), watchNamespace, controller.checkServerSecret)
 	controller.ingressBindingWatcher = controller.controller.WatchRequiredServices(watchNamespace, controller.ingressBindingEvent)
 	controller.egressBindingWatcher = controller.controller.WatchProvidedServices(watchNamespace, controller.egressBindingEvent)
+	controller.serviceGroupWatcher = controller.controller.WatchServiceGroups(watchNamespace, controller.serviceGroupEvent)
 
 	return controller, nil
 }
@@ -111,6 +113,7 @@ func (c *NetworkController) Run(stopCh <-chan struct{}) error {
 	c.serverSecretWatcher.Start(stopCh)
 	c.ingressBindingWatcher.Start(stopCh)
 	c.egressBindingWatcher.Start(stopCh)
+	c.serviceGroupWatcher.Start(stopCh)
 	c.stopCh = stopCh
 
 	log.Println("Waiting for informer caches to sync")
@@ -125,6 +128,9 @@ func (c *NetworkController) Run(stopCh <-chan struct{}) error {
 	}
 	if ok := c.egressBindingWatcher.Sync(stopCh); !ok {
 		return fmt.Errorf("Failed to wait for ingress binding watcher to sync")
+	}
+	if ok := c.serviceGroupWatcher.Sync(stopCh); !ok {
+		return fmt.Errorf("Failed to wait for service group watcher to sync")
 	}
 	log.Println("Starting event loop")
 	c.controller.Start(stopCh)
@@ -169,11 +175,18 @@ func (c *NetworkController) ingressBindingEvent(key string, binding *skupperv1al
 	if binding == nil {
 		return nil
 	}
-	return c.ensureSiteFor(key, )
+	return c.ensureSiteFor(key)
 }
 
 func (c *NetworkController) egressBindingEvent(key string, binding *skupperv1alpha1.ProvidedService) error {
 	if binding == nil {
+		return nil
+	}
+	return c.ensureSiteFor(key)
+}
+
+func (c *NetworkController) serviceGroupEvent(key string, group *skupperv1alpha1.ServiceGroup) error {
+	if group == nil {
 		return nil
 	}
 	return c.ensureSiteFor(key)

@@ -22,6 +22,8 @@ type ProvidedServiceExpansion interface{}
 
 type RequiredServiceExpansion interface{}
 
+type ServiceGroupExpansion interface{}
+
 type SiteExpansion interface{}
 
 type SkupperClusterPolicyExpansion interface{}

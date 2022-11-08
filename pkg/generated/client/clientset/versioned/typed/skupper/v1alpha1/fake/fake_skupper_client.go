@@ -36,6 +36,10 @@ func (c *FakeSkupperV1alpha1) RequiredServices(namespace string) v1alpha1.Requir
 	return &FakeRequiredServices{c, namespace}
 }
 
+func (c *FakeSkupperV1alpha1) ServiceGroups(namespace string) v1alpha1.ServiceGroupInterface {
+	return &FakeServiceGroups{c, namespace}
+}
+
 func (c *FakeSkupperV1alpha1) Sites(namespace string) v1alpha1.SiteInterface {
 	return &FakeSites{c, namespace}
 }

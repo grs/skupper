@@ -210,6 +210,7 @@ func (s *NetworkSite) linkTo(site *NetworkSite) error {
 	if s.manager.namespaceScoped {
 		setSyncerLabelAndAnnotation(s.site, token, token.ObjectMeta.Name)
 	}
+	token.ObjectMeta.OwnerReferences = getOwnerReferencesForSite(s.site)
 	err := s.ensureSecret(token)
 	if err != nil {
 		return err
@@ -235,7 +236,6 @@ func (s *NetworkSite) generateLinkToken() *corev1.Secret {
 	}
 	name := string(s.site.ObjectMeta.UID)
 	secret := certs.GenerateSecret(name, s.site.ObjectMeta.Name, "", s.manager.ca)
-	secret.ObjectMeta.OwnerReferences = getOwnerReferencesForSite(s.site)
 	secret.ObjectMeta.Annotations = map[string]string{
 		//TODO: add version annotation (need version to be written into site status)
 	}
@@ -289,16 +289,25 @@ func (s *NetworkSite) ensureSecret(desired *corev1.Secret) error {
 }
 
 func (m *NetworkManager) ensureSecret(namespace string, desired *corev1.Secret) error {
+	log.Printf("Ensuring secret %s in %s", desired.ObjectMeta.Name, namespace)
 	actual, err := m.client.CoreV1().Secrets(namespace).Get(desired.ObjectMeta.Name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		_, err = m.client.CoreV1().Secrets(namespace).Create(desired)
+		if err == nil {
+			log.Printf("Created secret %s in %s", desired.ObjectMeta.Name, namespace)
+		} else {
+			log.Printf("Failed to create secret %s in %s: %s", desired.ObjectMeta.Name, namespace, err)
+		}
 		return err
 	} else if err != nil {
 		return err
 	}
+	log.Printf("Secret %s in %s already exists", desired.ObjectMeta.Name, namespace)
 	if reflect.DeepEqual(actual.Data, desired.Data) {
+		log.Printf("Updating secret %s in %s", desired.ObjectMeta.Name, namespace)
 		_, err = m.client.CoreV1().Secrets(namespace).Update(actual)
 		if err != nil {
+			log.Printf("Failed to update secret %s in %s: %s", desired.ObjectMeta.Name, namespace, err)
 			return err
 		}
 	}

@@ -337,6 +337,24 @@ func (c *Controller) WatchServices(namespace string, handler ServiceHandler) *Se
 	return watcher
 }
 
+func (c *Controller) WatchService(name string, namespace string, handler ServiceHandler) *ServiceWatcher {
+	watcher := &ServiceWatcher{
+		client:  c.client,
+		handler: handler,
+		informer: corev1informer.NewFilteredServiceInformer(
+			c.client,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			ListByName(name),
+		),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
 type ServiceWatcher struct {
 	client    kubernetes.Interface
 	handler   ServiceHandler
@@ -381,6 +399,10 @@ func (w *ServiceWatcher) CreateService(svc *corev1.Service) (*corev1.Service, er
 
 func (w *ServiceWatcher) UpdateService(svc *corev1.Service) (*corev1.Service, error) {
 	return w.client.CoreV1().Services(w.namespace).Update(svc)
+}
+
+func (w *ServiceWatcher) DeleteService(name string) error {
+	return w.client.CoreV1().Services(w.namespace).Delete(name, &metav1.DeleteOptions{})
 }
 
 func (w *ServiceWatcher) GetService(name string) (*corev1.Service, error) {
@@ -686,6 +708,85 @@ func (w *ProvidedServiceWatcher) List() []*skupperv1alpha1.ProvidedService {
 	results := []*skupperv1alpha1.ProvidedService{}
 	for _, o := range list {
 		results = append(results, o.(*skupperv1alpha1.ProvidedService))
+	}
+	return results
+}
+
+func (c *Controller) WatchServiceGroups(namespace string, handler ServiceGroupHandler) *ServiceGroupWatcher {
+	watcher := &ServiceGroupWatcher{
+		handler:   handler,
+		informer:  skupperv1alpha1informer.NewServiceGroupInformer(
+			c.skupperClient,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
+func (c *Controller) WatchServiceGroupsWithOptions(options skupperinterfaces.TweakListOptionsFunc, namespace string, handler ServiceGroupHandler) *ServiceGroupWatcher {
+	watcher := &ServiceGroupWatcher{
+		handler:   handler,
+		informer:  skupperv1alpha1informer.NewFilteredServiceGroupInformer(
+			c.skupperClient,
+			namespace,
+			time.Second*30,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			options),
+		namespace: namespace,
+	}
+
+	watcher.informer.AddEventHandler(c.newEventHandler(watcher))
+	return watcher
+}
+
+type ServiceGroupHandler func(string, *skupperv1alpha1.ServiceGroup) error
+
+type ServiceGroupWatcher struct {
+	handler   ServiceGroupHandler
+	informer  cache.SharedIndexInformer
+	namespace string
+}
+
+func (w *ServiceGroupWatcher) Handle(event ResourceChange) error {
+	obj, err := w.Get(event.Key)
+	if err != nil {
+		return err
+	}
+	return w.handler(event.Key, obj)
+}
+
+func (w *ServiceGroupWatcher) Describe(event ResourceChange) string {
+	return fmt.Sprintf("ServiceGroup %s", event.Key)
+}
+
+func (w *ServiceGroupWatcher) Start(stopCh <-chan struct{}) {
+	go w.informer.Run(stopCh)
+}
+
+func (w *ServiceGroupWatcher) Sync(stopCh <-chan struct{}) bool {
+	return cache.WaitForCacheSync(stopCh, w.informer.HasSynced)
+}
+
+func (w *ServiceGroupWatcher) Get(key string) (*skupperv1alpha1.ServiceGroup, error) {
+	entity, exists, err := w.informer.GetStore().GetByKey(key)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+	return entity.(*skupperv1alpha1.ServiceGroup), nil
+}
+
+func (w *ServiceGroupWatcher) List() []*skupperv1alpha1.ServiceGroup {
+	list := w.informer.GetStore().List()
+	results := []*skupperv1alpha1.ServiceGroup{}
+	for _, o := range list {
+		results = append(results, o.(*skupperv1alpha1.ServiceGroup))
 	}
 	return results
 }

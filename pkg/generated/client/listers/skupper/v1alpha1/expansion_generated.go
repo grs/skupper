@@ -34,6 +34,14 @@ type RequiredServiceListerExpansion interface{}
 // RequiredServiceNamespaceLister.
 type RequiredServiceNamespaceListerExpansion interface{}
 
+// ServiceGroupListerExpansion allows custom methods to be added to
+// ServiceGroupLister.
+type ServiceGroupListerExpansion interface{}
+
+// ServiceGroupNamespaceListerExpansion allows custom methods to be added to
+// ServiceGroupNamespaceLister.
+type ServiceGroupNamespaceListerExpansion interface{}
+
 // SiteListerExpansion allows custom methods to be added to
 // SiteLister.
 type SiteListerExpansion interface{}

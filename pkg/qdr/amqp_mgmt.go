@@ -195,6 +195,10 @@ func NewAgentPool(url string, config *tls.Config) *AgentPool {
 	}
 }
 
+func (p *AgentPool) ConnectionFactory() *ConnectionFactory {
+	return NewConnectionFactory(p.url, p.config)
+}
+
 func (p *AgentPool) Get() (*Agent, error) {
 	var a *Agent
 	var err error
