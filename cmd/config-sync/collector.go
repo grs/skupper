@@ -11,7 +11,9 @@ import (
 	"github.com/skupperproject/skupper/pkg/config"
 	"github.com/skupperproject/skupper/pkg/flow"
 	"github.com/skupperproject/skupper/pkg/kube"
+	kubeflow "github.com/skupperproject/skupper/pkg/kube/flow"
 	"github.com/skupperproject/skupper/pkg/qdr"
+	"github.com/skupperproject/skupper/pkg/version"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -65,6 +67,24 @@ func siteCollector(stopCh <-chan struct{}, cli *client.VanClient) *flow.FlowColl
 	return fc
 }
 
+func startFlowController(stopCh <-chan struct{}, cli *client.VanClient) error {
+	configmap, err := kube.GetConfigMap(types.SiteConfigMapName, cli.Namespace, cli.KubeClient)
+	if err != nil {
+		return err
+	}
+	creationTime := uint64(configmap.ObjectMeta.CreationTimestamp.UnixNano()) / uint64(time.Microsecond)
+	siteId := os.Getenv("SKUPPER_SITE_ID")
+	flowController := flow.NewFlowController(siteId, version.Version, creationTime, qdr.NewConnectionFactory("amqp://localhost:5672", nil), nil/*TODO: enable policy checks?*/)
+
+	controller := kube.NewController("flow-controller", cli)
+	kubeflow.WatchPods(controller, cli.Namespace, flowController.UpdateProcess)
+	//TODO: should watching nodes be optional or should we attempt to determine if we have permissions first?
+	//kubeflow.WatchNodes(controller, cli.Namespace, flowController.UpdateHost)
+	controller.Start(stopCh)
+	flowController.Start(stopCh)
+	return nil
+}
+
 func runLeaderElection(lock *resourcelock.ConfigMapLock, ctx context.Context, id string, cli *client.VanClient) {
 	var stopCh chan struct{}
 	podname, _ := os.Hostname()
@@ -79,6 +99,9 @@ func runLeaderElection(lock *resourcelock.ConfigMapLock, ctx context.Context, id
 				log.Printf("COLLECTOR: Leader %s starting site collection \n", podname)
 				stopCh = make(chan struct{})
 				siteCollector(stopCh, cli)
+				if err := startFlowController(stopCh, cli); err != nil {
+					log.Printf("COLLECTOR: Failed to start controller for emitting site events: %s", err)
+				}
 			},
 			OnStoppedLeading: func() {
 				// No longer the leader, transition to inactive
