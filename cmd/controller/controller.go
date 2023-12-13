@@ -174,6 +174,7 @@ func (c *Controller) checkListener(key string, configmap *corev1.ConfigMap) erro
 }
 
 func (c *Controller) checkLinkConfig(key string, secret *corev1.Secret) error {
+	log.Printf("checkLinkConfig(%s)", key)
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err

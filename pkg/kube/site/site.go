@@ -48,6 +48,7 @@ func NewSite(namespace string, controller *kube.Controller) *Site {
 }
 
 func (s *Site) Recover(cm *corev1.ConfigMap) error {
+	log.Printf("Recovering site %s", cm.ObjectMeta.Namespace)
 	//TODO: check version and perform any necessary update tasks
 	return s.Reconcile(cm)
 }
@@ -63,6 +64,7 @@ func (s *Site) Reconcile(cm *corev1.ConfigMap) error {
 		return err
 	}
 	s.config = &siteConfig.Spec
+	log.Printf("Reconciling site %s", cm.ObjectMeta.Namespace)
 	// ensure necessary resources:
 	// 1. skupper-internal configmap
 	if !s.initialised {
@@ -110,6 +112,7 @@ func (s *Site) Reconcile(cm *corev1.ConfigMap) error {
 	if err != nil {
 		return err
 	}
+	//TODO: handle any cluster roles and bindings e.g. reading nodes or skupper policies
 	//}
 	// 3. deployment, services & any ingress related resources
 	err = resources.Apply(s.controller, ctxt, s.namespace, string(cm.ObjectMeta.UID), s.config)
@@ -241,6 +244,10 @@ func (s *Site) checkRole(ctxt context.Context) error {
 }
 
 func (s *Site) checkCredentials(ctxt context.Context) error {
+	if s.config == nil {
+		log.Printf("Site %s not yet initialised", s.namespace)
+		return nil
+	}
 	resolver, err := resolver.NewResolver(s.controller, s.namespace, s.config)
 	if err != nil {
 		return err
@@ -678,6 +685,7 @@ func (s *Site) unlink(name string) error {
 }
 
 func (s *Site) CheckLoadBalancer(svc *corev1.Service) error {
+	log.Printf("Checking loadbalancer for service %s/%s", svc.ObjectMeta.Namespace, svc.ObjectMeta.Name)
 	return s.checkCredentials(context.TODO())
 }
 

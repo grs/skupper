@@ -10,6 +10,7 @@ import (
 
 	"github.com/skupperproject/skupper/client"
 	"github.com/skupperproject/skupper/pkg/version"
+	"github.com/skupperproject/skupper/pkg/kube/vault"
 )
 
 func describe(i interface{}) {
@@ -57,12 +58,20 @@ func main() {
 		log.Fatal("Error getting van client ", err.Error())
 	}
 
+	if os.Getenv("ENABLE_VAULT_INTEGRATION") == "1" {
+		vault, err := vault.NewController(cli)
+		if err != nil {
+			log.Fatal("Error getting new vault controller ", err.Error())
+		}
+		go vault.Run(stopCh)
+	}
+
 	controller, err := NewController(cli)
 	if err != nil {
-		log.Fatal("Error getting new site controller ", err.Error())
+		log.Fatal("Error getting new controller ", err.Error())
 	}
 
 	if err = controller.Run(stopCh); err != nil {
-		log.Fatal("Error running site controller: ", err.Error())
+		log.Fatal("Error running controller: ", err.Error())
 	}
 }

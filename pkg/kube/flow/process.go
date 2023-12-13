@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"log"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ type ProcessUpdateHandler func(deleted bool, name string, process *flow.ProcessR
 
 func WatchPods(controller *kube.Controller, namespace string, handler ProcessUpdateHandler) {
 	controller.WatchAllPods(namespace, func (key string, pod *corev1.Pod) error {
+		log.Printf("flow-controller: pod event %s", key)
 		if pod == nil {
 			handler(true, key, nil)
 		} else {
