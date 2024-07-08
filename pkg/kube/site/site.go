@@ -71,9 +71,14 @@ func (s *Site) routerMode() qdr.Mode {
 const SSL_PROFILE_PATH = "/etc/skupper-router-certs"
 
 func (s *Site) Reconcile(siteDef *skupperv1alpha1.Site) error {
+	err := s.reconcile(siteDef)
+	return s.updateConfigured(err)
+}
+
+func (s *Site) reconcile(siteDef *skupperv1alpha1.Site) error {
 	if s.site != nil && s.site.Name != siteDef.Name {
 		log.Printf("Rejecting site %s/%s as %s is already active", siteDef.Namespace, siteDef.Name, s.site.Name)
-		return s.markSiteInactive(siteDef, fmt.Sprintf("An active site already exists in the namespace (%s)", s.site.Name))
+		return s.markSiteInactive(siteDef, fmt.Errorf("An active site already exists in the namespace (%s)", s.site.Name))
 	}
 	s.site = siteDef
 	s.name = string(siteDef.ObjectMeta.Name)
@@ -157,7 +162,7 @@ func (s *Site) Reconcile(siteDef *skupperv1alpha1.Site) error {
 			return err
 		}
 	}
-	return s.updateStatus()
+	return nil
 }
 
 func (s *Site) groups() []string {
@@ -578,21 +583,18 @@ func (s *Site) updateConnectorStatus(connector *skupperv1alpha1.Connector, err e
 	if connector == nil {
 		return nil
 	}
-	if err == nil {
-		connector.Status.Active = true
-		connector.Status.StatusMessage = skupperv1alpha1.STATUS_OK
-	} else {
-		connector.Status.Active = false
-		connector.Status.StatusMessage = err.Error()
-	}
-	_, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Connectors(connector.ObjectMeta.Namespace).UpdateStatus(context.TODO(), connector, metav1.UpdateOptions{})
-	if updateErr != nil {
-		if err == nil {
-			return updateErr
+	if connector.SetConfigured(err) {
+		updated, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Connectors(connector.ObjectMeta.Namespace).UpdateStatus(context.TODO(), connector, metav1.UpdateOptions{})
+		if updateErr != nil {
+			if err == nil {
+				return updateErr
+			}
+			return fmt.Errorf("Error updating connector status for %s: %s", err, updateErr)
 		}
-		return fmt.Errorf("Error updating connector status for %s: %s", err, updateErr)
+		s.adaptor.updateConnectorPointer(updated)
+		return err
 	}
-	return err
+	return nil
 }
 
 func (s *Site) CheckConnector(name string, connector *skupperv1alpha1.Connector) error {
@@ -614,19 +616,14 @@ func (s *Site) updateListenerStatus(listener *skupperv1alpha1.Listener, err erro
 	if listener == nil {
 		return nil
 	}
-	if err == nil {
-		listener.Status.Active = true
-		listener.Status.StatusMessage = skupperv1alpha1.STATUS_OK
-	} else {
-		listener.Status.Active = false
-		listener.Status.StatusMessage = err.Error()
-	}
-	_, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Listeners(listener.ObjectMeta.Namespace).UpdateStatus(context.TODO(), listener, metav1.UpdateOptions{})
-	if updateErr != nil {
-		if err == nil {
-			return updateErr
+	if listener.SetConfigured(err) {
+		_, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Listeners(listener.ObjectMeta.Namespace).UpdateStatus(context.TODO(), listener, metav1.UpdateOptions{})
+		if updateErr != nil {
+			if err == nil {
+				return updateErr
+			}
+			return fmt.Errorf("Error updating listener status for %s: %s", err, updateErr)
 		}
-		return fmt.Errorf("Error updating listener status for %s: %s", err, updateErr)
 	}
 	return err
 }
@@ -697,33 +694,59 @@ func (s *Site) updateLinkStatus(link *skupperv1alpha1.Link, err error) error {
 	if link == nil {
 		return nil
 	}
-	if err == nil {
-		link.Status.Configured = true
-		link.Status.StatusMessage = skupperv1alpha1.STATUS_OK
-	} else {
-		link.Status.Configured = false
-		link.Status.StatusMessage = err.Error()
-	}
-	_, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Links(link.ObjectMeta.Namespace).UpdateStatus(context.TODO(), link, metav1.UpdateOptions{})
-	if updateErr != nil {
-		if err == nil {
+	if link.SetConfigured(err) {
+		updated, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Links(link.ObjectMeta.Namespace).UpdateStatus(context.TODO(), link, metav1.UpdateOptions{})
+		if updateErr != nil {
 			return updateErr
 		}
-		return fmt.Errorf("Error updating link status for %s: %s", err, updateErr)
+		s.links[link.ObjectMeta.Name].Update(updated)
 	}
-	return err
+	return nil
 }
 
 func (s *Site) Deleted() {
 	s.adaptor.cleanup()
 }
 
-func (s *Site) updateStatus() error {
-	log.Printf("Updating site status for %s", s.namespace)
-	s.site.Status.Active = true
-	s.site.Status.Endpoints = s.endpoints()
-	s.site.Status.StatusMessage = skupperv1alpha1.STATUS_OK
-	s.site.Status.DefaultIssuer = s.defaultIssuer()
+func (s *Site) setDefaultIssuerInStatus() bool {
+	if issuer := s.defaultIssuer(); s.site.Status.DefaultIssuer != issuer {
+		s.site.Status.DefaultIssuer = issuer
+		return true
+	}
+	return false
+}
+
+func (s *Site) updateConfigured(err error) error {
+	changed := false
+	if s.setDefaultIssuerInStatus() {
+		changed = true
+	}
+	if s.site.SetConfigured(err) {
+		changed = true
+	}
+	if changed {
+		return s.updateSiteStatus()
+	}
+	return nil
+}
+
+func (s *Site) updateResolved() error {
+	endpoints := s.endpoints()
+	changed := false
+	if !reflect.DeepEqual(s.site.Status.Endpoints, endpoints) {
+		s.site.Status.Endpoints = endpoints
+		changed = true
+	}
+	if len(endpoints) > 0 && s.site.SetResolved(nil) {
+		changed = true
+	}
+	if changed {
+		return s.updateSiteStatus()
+	}
+	return nil
+}
+
+func (s *Site) updateSiteStatus() error {
 	updated, err := s.controller.GetSkupperClient().SkupperV1alpha1().Sites(s.site.ObjectMeta.Namespace).UpdateStatus(context.TODO(), s.site, metav1.UpdateOptions{})
 	if err != nil {
 		return err
@@ -753,15 +776,11 @@ func (s *Site) NetworkStatusUpdated(network []skupperv1alpha1.SiteRecord) error 
 	return nil
 }
 
-func (s *Site) markSiteInactive(site *skupperv1alpha1.Site, status string) error {
-	if site.Status.Active == false && site.Status.StatusMessage == status {
-		return nil
-	}
-	site.Status.Active = false
-	site.Status.StatusMessage = status
-	_, err := s.UpdateSiteStatus(site)
-	if err != nil {
-		return err
+func (s *Site) markSiteInactive(site *skupperv1alpha1.Site, err error) error {
+	if site.SetConfigured(err) {
+		if _, err := s.UpdateSiteStatus(site); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -785,14 +804,9 @@ func (s *Site) CheckSecuredAccess(sa *skupperv1alpha1.SecuredAccess) {
 		log.Printf("No RouterAccess %s found for SecuredAccess %s", name, sa.Name)
 		return
 	}
-	if !la.Status.UpdateEndpointsForGroup(sa.Status.Endpoints, sa.Name) {
-		return
+	if la.Resolve(sa.Status.Endpoints, sa.Name) {
+		s.updateRouterAccessStatus(la)
 	}
-	la.Status.Active = len(la.Status.Endpoints) > 0
-	if la.Status.Active {
-		la.Status.StatusMessage = skupperv1alpha1.STATUS_OK
-	}
-	s.updateRouterAccessStatus(la)
 }
 
 func (s *Site) updateRouterAccessStatus(la *skupperv1alpha1.RouterAccess) {
@@ -860,27 +874,26 @@ func (s *Site) checkSecuredAccess() error {
 
 func (s *Site) CheckRouterAccess(name string, la *skupperv1alpha1.RouterAccess) error {
 	specChanged := false
-	statusChanged := false
 	if la == nil {
 		delete(s.linkAccess, name)
 		specChanged = true
-		statusChanged = true
 	} else {
 		if existing, ok := s.linkAccess[name]; ok {
 			specChanged = !reflect.DeepEqual(existing.Spec, la.Spec)
-			statusChanged = !reflect.DeepEqual(existing.Status, la.Status)
 		}
 		s.linkAccess[name] = la
 	}
 	if !s.initialised {
 		return nil
 	}
-	if specChanged || !la.Status.Active {
+	if specChanged || !la.IsConfigured() {
 		var previousGroups []string
 		groups := s.groups()
+		var errors []string
 		for i, group := range groups {
 			if err := s.updateRouterConfig(s.linkAccess.DesiredConfig(previousGroups, SSL_PROFILE_PATH), group); err != nil {
 				log.Printf("Error updating router config for %s: %s", s.namespace, err)
+				errors = append(errors, err.Error())
 			}
 			if la != nil {
 				name := la.Name
@@ -892,18 +905,21 @@ func (s *Site) CheckRouterAccess(name string, la *skupperv1alpha1.RouterAccess) 
 					"internal.skupper.io/routeraccess": la.Name,
 				}
 				if err := s.access.Ensure(s.namespace, name, asSecuredAccessSpec(la, group, s.defaultIssuer()), annotations, s.ownerReferences()); err != nil {
-					//TODO: add message to site status
 					log.Printf("Error ensuring SecuredAccess for RouterAccess %s: %s", la.Key(), err)
+					errors = append(errors, err.Error())
 				}
 			}
 			previousGroups = append(previousGroups, group)
 		}
+		var err error
+		if len(errors) > 0 {
+			err = fmt.Errorf(strings.Join(errors, ", "))
+		}
+		if la.SetConfigured(err) {
+			s.updateRouterAccessStatus(la)
+		}
 	}
-	if statusChanged {
-		log.Printf("Updating site status for %s/%s as RouterAccess %s status has changed", s.namespace, s.name, name)
-		s.updateStatus()
-	}
-	return nil
+	return s.updateResolved()
 }
 
 func (s *Site) GetSite() *skupperv1alpha1.Site {

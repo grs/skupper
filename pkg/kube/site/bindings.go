@@ -40,6 +40,12 @@ func (a *BindingAdaptor) cleanup() {
 	}
 }
 
+func (a *BindingAdaptor) updateConnectorPointer(connector *skupperv1alpha1.Connector) {
+	if selector, ok := a.selectors[connector.Name]; ok {
+		selector.connector = connector
+	}
+}
+
 func (a *BindingAdaptor) ConnectorUpdated(connector *skupperv1alpha1.Connector, specChanged bool) bool {
 	if !specChanged {
 		if connector.Spec.Selector != "" {
