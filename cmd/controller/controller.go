@@ -121,6 +121,7 @@ func NewController(cli internalclient.Clients, watchNamespace string, currentNam
 	controller.controller.WatchConfigMaps(skupperNetworkStatus(), watchNamespace, controller.networkStatusUpdate)
 	controller.controller.WatchAccessTokens(watchNamespace, controller.checkAccessToken)
 	controller.controller.WatchSecuredAccesses(watchNamespace, controller.checkSecuredAccess)
+	controller.controller.WatchPods("skupper.io/component=router,skupper.io/type=site", watchNamespace, controller.routerPodEvent)
 
 	controller.certMgr = certificates.NewCertificateManager(controller.controller)
 	controller.certMgr.Watch(watchNamespace)
@@ -263,6 +264,14 @@ func (c *Controller) checkAccessToken(key string, token *skupperv1alpha1.AccessT
 		return nil
 	}
 	return claims.RedeemAccessToken(token, site, c.controller)
+}
+
+func (c *Controller) routerPodEvent(key string, pod *corev1.Pod) error {
+	namespace, _, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+	return c.getSite(namespace).RouterPodEvent(key, pod)
 }
 
 func (c *Controller) generateLinkConfig(namespace string, name string, subject string, writer io.Writer) error {

@@ -37,6 +37,7 @@ type Site struct {
 	certs       certificates.CertificateManager
 	access      securedaccess.Factory
 	adaptor     BindingAdaptor
+	routerPods  map[string]*corev1.Pod
 }
 
 func NewSite(namespace string, controller *kube.Controller, certs certificates.CertificateManager, access securedaccess.Factory) *Site {
@@ -48,6 +49,7 @@ func NewSite(namespace string, controller *kube.Controller, certs certificates.C
 		linkAccess: site.RouterAccessMap{},
 		certs:      certs,
 		access:     access,
+		routerPods: map[string]*corev1.Pod{},
 	}
 }
 
@@ -915,7 +917,7 @@ func (s *Site) CheckRouterAccess(name string, la *skupperv1alpha1.RouterAccess) 
 		if len(errors) > 0 {
 			err = fmt.Errorf(strings.Join(errors, ", "))
 		}
-		if la.SetConfigured(err) {
+		if la != nil && la.SetConfigured(err) {
 			s.updateRouterAccessStatus(la)
 		}
 	}
@@ -924,6 +926,64 @@ func (s *Site) CheckRouterAccess(name string, la *skupperv1alpha1.RouterAccess) 
 
 func (s *Site) GetSite() *skupperv1alpha1.Site {
 	return s.site
+}
+
+func (s *Site) RouterPodEvent(key string, pod *corev1.Pod) error {
+	if pod == nil {
+		delete(s.routerPods, key)
+	} else {
+		s.routerPods[key] = pod
+	}
+	if s.site == nil {
+		return nil
+	}
+	if s.site.SetRunning(s.isRouterPodRunning()) {
+		return s.updateSiteStatus()
+	}
+	return nil
+}
+
+func (s *Site) isRouterPodRunning() error {
+	if len(s.routerPods) == 0 {
+		return fmt.Errorf("No router pod created in %s", s.namespace)
+	}
+	var err error
+	for _, pod := range s.routerPods {
+		if kube.IsPodRunning(pod) && kube.IsPodReady(pod) {
+			return nil
+		} else {
+			err = podError(pod)
+		}
+	}
+	if err == nil {
+		err = fmt.Errorf("No router pod is ready")
+	}
+	return err
+}
+
+func podError(pod *corev1.Pod) error {
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			var err error
+			if c.Reason == "ContainersNotReady" {
+				err = containerError(pod)
+			}
+			if err == nil {
+				err = fmt.Errorf(c.Message)
+			}
+			return err
+		}
+	}
+	return fmt.Errorf("Pod %s not ready", pod.Name)
+}
+
+func containerError(pod *corev1.Pod) error {
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.State.Waiting != nil {
+			return fmt.Errorf(s.State.Waiting.Message)
+		}
+	}
+	return nil
 }
 
 type ConfigUpdateList []qdr.ConfigUpdate

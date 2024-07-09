@@ -198,8 +198,8 @@ func (s *Site) setReady(err error) bool {
 
 func (s *Site) isReady() bool {
 	return meta.IsStatusConditionTrue(s.Status.Conditions, CONDITION_TYPE_CONFIGURED) &&
-		//TODO: check CONDITION_TYPE_RUNNING once that is being checked
-		(!s.resolutionRequired() || meta.IsStatusConditionTrue(s.Status.Conditions, CONDITION_TYPE_RESOLVED))
+		(!s.resolutionRequired() || meta.IsStatusConditionTrue(s.Status.Conditions, CONDITION_TYPE_RESOLVED)) &&
+		meta.IsStatusConditionTrue(s.Status.Conditions, CONDITION_TYPE_RUNNING)
 }
 
 func (s *Site) IsActive() bool {
