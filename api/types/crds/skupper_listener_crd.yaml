@@ -70,6 +70,8 @@ spec:
                     - reason
                     - status
                     - type
+                matchingConnectorCount:
+                  type: integer
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -89,6 +91,10 @@ spec:
         type: string
         description: The status of the listener
         jsonPath: .status.status
+      - name: Matching Connector Count
+        type: integer
+        description: The number of connectors in the network with a matching routing key.
+        jsonPath: .status.matchingConnectorCount
   scope: Namespaced
   names:
     plural: listeners

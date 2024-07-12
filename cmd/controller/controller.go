@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1beta1"
@@ -256,7 +255,7 @@ func (c *Controller) checkSecuredAccessHttpProxy(key string, o *unstructured.Uns
 }
 
 func (c *Controller) checkAccessToken(key string, token *skupperv1alpha1.AccessToken) error {
-	if token == nil || token.Status.Redeemed {
+	if token == nil || token.IsRedeemed() {
 		return nil
 	}
 	site := c.getSite(token.Namespace).GetSite()
@@ -328,19 +327,6 @@ func extractSiteRecords(status *flow.NetworkStatus) []skupperv1alpha1.SiteRecord
 		return nil
 	}
 	var records []skupperv1alpha1.SiteRecord
-	routers := map[string]string{} // router name -> site name
-	for _, site := range status.Sites {
-		for _, router := range site.RouterStatus {
-			if router.Router.Name != nil && site.Site.Name != nil {
-				name := *router.Router.Name
-				parts := strings.Split(name, "/")
-				if len(parts) == 2 {
-					name = parts[1]
-				}
-				routers[name] = *site.Site.Name
-			}
-		}
-	}
 	for _, site := range status.Sites {
 		record := skupperv1alpha1.SiteRecord{
 			Id: site.Site.Identity,
@@ -361,9 +347,10 @@ func extractSiteRecords(status *flow.NetworkStatus) []skupperv1alpha1.SiteRecord
 		for _, router := range site.RouterStatus {
 			for _, link := range router.Links {
 				if link.Name != nil {
-					if siteName, ok := routers[*link.Name]; ok {
-						record.Links = append(record.Links, siteName)
-					}
+					record.Links = append(record.Links, skupperv1alpha1.LinkRecord{
+						Name:         *link.Name,
+						RemoteSiteId: "", //TODO: populate once we have a peer field in the link record
+					})
 				}
 			}
 			for _, connector := range router.Connectors {

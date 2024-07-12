@@ -14,6 +14,7 @@ import (
 
 	"github.com/skupperproject/skupper/api/types"
 	skupperv1alpha1 "github.com/skupperproject/skupper/pkg/apis/skupper/v1alpha1"
+	internalclient "github.com/skupperproject/skupper/internal/kube/client"
 	"github.com/skupperproject/skupper/pkg/kube"
 	"github.com/skupperproject/skupper/pkg/kube/certificates"
 	kubeqdr "github.com/skupperproject/skupper/pkg/kube/qdr"
@@ -404,18 +405,18 @@ func (s *Site) IsInitialised() bool {
 	return s.initialised
 }
 
-func (s *Site) Select(connector *skupperv1alpha1.Connector) *TargetSelection {
+func (s *Site) Select(connector *skupperv1alpha1.Connector) TargetSelection {
 	name := connector.Name
 	selector := connector.Spec.Selector
 	includeNotReady := connector.Spec.IncludeNotReady
 	if selector == "" {
 		return nil
 	}
-	handler := &TargetSelection{
+	handler := &TargetSelectionImpl{
 		stopCh:          make(chan struct{}),
 		site:            s,
 		name:            name,
-		connector:       connector,
+		selector:        selector,
 		namespace:       s.namespace,
 		includeNotReady: includeNotReady,
 	}
@@ -581,64 +582,68 @@ func (s *Site) updateRouterConfig(update qdr.ConfigUpdate, group string) error {
 	return nil
 }
 
-func (s *Site) updateConnectorStatus(connector *skupperv1alpha1.Connector, err error) error {
-	if connector == nil {
-		return nil
-	}
-	if connector.SetConfigured(err) {
-		updated, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Connectors(connector.ObjectMeta.Namespace).UpdateStatus(context.TODO(), connector, metav1.UpdateOptions{})
-		if updateErr != nil {
-			if err == nil {
-				return updateErr
-			}
-			return fmt.Errorf("Error updating connector status for %s: %s", err, updateErr)
-		}
-		s.adaptor.updateConnectorPointer(updated)
+func (s *Site) updateConnectorStatus(connector *skupperv1alpha1.Connector) error {
+	updated, err := updateConnectorStatus(s.controller, connector)
+	if err != nil {
 		return err
+	}
+	s.bindings.UpdateConnector(updated.Name, updated)
+	return nil
+}
+
+func (s *Site) updateConnectorConfiguredStatus(connector *skupperv1alpha1.Connector, err error) error {
+	if connector.SetConfigured(err) {
+		return s.updateConnectorStatus(connector)
+	}
+	return nil
+}
+
+func (s *Site) updateConnectorConfiguredStatusWithSelectedPods(connector *skupperv1alpha1.Connector, selected []skupperv1alpha1.PodDetails) error {
+	var err error
+	if len(selected) == 0 {
+		log.Printf("No pods selected for %s/%s", connector.Namespace, connector.Name)
+		err = fmt.Errorf("No pods match selector")
+	} else {
+
+	}
+	if connector.SetConfigured(err) || connector.SetSelectedPods(selected) {
+		return s.updateConnectorStatus(connector)
 	}
 	return nil
 }
 
 func (s *Site) CheckConnector(name string, connector *skupperv1alpha1.Connector) error {
-	update, err := s.bindings.UpdateConnector(name, connector)
-	if err != nil {
-		return s.updateConnectorStatus(connector, err)
-	}
-	if update == nil {
+	update := s.bindings.UpdateConnector(name, connector)
+	if update == nil || s.site == nil {
 		return nil
 	}
-	if s.site == nil {
-		return nil
+	err := s.updateRouterConfigForGroups(update)
+	if connector == nil {
+		return err
 	}
-	err = s.updateRouterConfigForGroups(update)
-	return s.updateConnectorStatus(connector, err)
+	return s.updateConnectorConfiguredStatus(connector, err)
 }
 
 func (s *Site) updateListenerStatus(listener *skupperv1alpha1.Listener, err error) error {
-	if listener == nil {
-		return nil
-	}
 	if listener.SetConfigured(err) {
-		_, updateErr := s.controller.GetSkupperClient().SkupperV1alpha1().Listeners(listener.ObjectMeta.Namespace).UpdateStatus(context.TODO(), listener, metav1.UpdateOptions{})
-		if updateErr != nil {
-			if err == nil {
-				return updateErr
-			}
-			return fmt.Errorf("Error updating listener status for %s: %s", err, updateErr)
+		updated, err := s.controller.GetSkupperClient().SkupperV1alpha1().Listeners(listener.ObjectMeta.Namespace).UpdateStatus(context.TODO(), listener, metav1.UpdateOptions{})
+		if err == nil {
+			return err
 		}
+		s.bindings.UpdateListener(updated.Name, updated)
 	}
 	return err
 }
 
 func (s *Site) CheckListener(name string, listener *skupperv1alpha1.Listener) error {
-	update, err := s.bindings.UpdateListener(name, listener)
-	if err != nil {
-		return s.updateListenerStatus(listener, err)
-	}
-	if update == nil {
+	update := s.bindings.UpdateListener(name, listener)
+	if update == nil || s.site == nil {
 		return nil
 	}
-	err = s.updateRouterConfigForGroups(update)
+	err := s.updateRouterConfigForGroups(update)
+	if listener == nil {
+		return err
+	}
 	return s.updateListenerStatus(listener, err)
 }
 
@@ -763,19 +768,15 @@ func (s *Site) NetworkStatusUpdated(network []skupperv1alpha1.SiteRecord) error 
 	}
 	s.site.Status.Network = network
 	s.site.Status.SitesInNetwork = len(network)
-	services := map[string]string{}
-	for _, site := range network {
-		for _, svc := range site.Services {
-			services[svc.RoutingKey] = svc.RoutingKey
-		}
-	}
-	s.site.Status.ServicesInNetwork = len(services)
 	updated, err := s.UpdateSiteStatus(s.site)
 	if err != nil {
 		return err
 	}
 	s.site = updated
-	return nil
+
+	bindingStatus := newBindingStatus(s.controller, network)
+	s.bindings.Map(bindingStatus.updateMatchingListenerCount, bindingStatus.updateMatchingConnectorCount)
+	return bindingStatus.error()
 }
 
 func (s *Site) markSiteInactive(site *skupperv1alpha1.Site, err error) error {
@@ -996,4 +997,12 @@ func (l ConfigUpdateList) Apply(config *qdr.RouterConfig) bool {
 		}
 	}
 	return updated
+}
+
+func updateConnectorStatus(client internalclient.Clients, connector *skupperv1alpha1.Connector) (*skupperv1alpha1.Connector, error) {
+	return client.GetSkupperClient().SkupperV1alpha1().Connectors(connector.ObjectMeta.Namespace).UpdateStatus(context.TODO(), connector, metav1.UpdateOptions{})
+}
+
+func updateListenerStatus(client internalclient.Clients, listener *skupperv1alpha1.Listener) (*skupperv1alpha1.Listener, error) {
+	return client.GetSkupperClient().SkupperV1alpha1().Listeners(listener.ObjectMeta.Namespace).UpdateStatus(context.TODO(), listener, metav1.UpdateOptions{})
 }

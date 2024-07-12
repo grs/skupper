@@ -127,6 +127,7 @@ func (g *Grants) recheckUrl() {
 			if message == "" {
 				message = skupperv1alpha1.STATUS_OK
 			}
+			grant.SetResolved()
 			if grant.Status.SetStatusMessage(message) {
 				if err := g.updateGrantStatus(grant); err != nil {
 					log.Printf("Error updating grant %s after setting url: %s", key, err)
@@ -140,6 +141,7 @@ func (g *Grants) recheckCa() {
 	for _, grant := range g.getAll() {
 		key := fmt.Sprintf("%s/%s", grant.Namespace, grant.Name)
 		if g.checkCa(key, grant) {
+			grant.SetResolved()
 			if err := g.updateGrantStatus(grant); err != nil {
 				log.Printf("Error updating grant %s after setting ca: %s", key, err)
 			}
@@ -220,11 +222,15 @@ func (g *Grants) checkGrant(key string, grant *skupperv1alpha1.AccessGrant) erro
 			changed = true
 		}
 	}
+	var err error
 
 	if len(status) != 0 {
-		grant.Status.StatusMessage = strings.Join(status, ", ")
+		err = fmt.Errorf(strings.Join(status, ", "))
+	}
+	if grant.SetProcessed(err) {
 		changed = true
-	} else if grant.Status.SetStatusMessage(skupperv1alpha1.STATUS_OK) {
+	}
+	if grant.SetResolved() {
 		changed = true
 	}
 

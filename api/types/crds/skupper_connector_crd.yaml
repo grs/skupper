@@ -80,6 +80,17 @@ spec:
                     - reason
                     - status
                     - type
+                selectedPods:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      ip:
+                        type: string
+                matchingListenerCount:
+                  type: integer
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -103,6 +114,10 @@ spec:
         type: string
         description: The status of the connector
         jsonPath: .status.status
+      - name: Matching Listener Count
+        type: integer
+        description: The number of listeners in the network with a matching routing key.
+        jsonPath: .status.matchingListenerCount
   scope: Namespaced
   names:
     plural: connectors

@@ -89,8 +89,6 @@ spec:
                         type: string
                 sitesInNetwork:
                   type: integer
-                servicesInNetwork:
-                  type: integer
                 network:
                   type: array
                   items:
@@ -109,7 +107,12 @@ spec:
                       links:
                         type: array
                         items:
-                          type: string
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            remoteSiteId:
+                              type: string
                       services:
                         type: array
                         items:
@@ -136,10 +139,6 @@ spec:
         type: integer
         description: The number of sites in the network
         jsonPath: .status.sitesInNetwork
-      - name: Services In Network
-        type: integer
-        description: The number of services in the network
-        jsonPath: .status.servicesInNetwork
   scope: Namespaced
   names:
     plural: sites
